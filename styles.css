@@ -21,11 +21,11 @@ body {
 
 .app-header, .app-footer {
   text-align: center;
-  padding: 16px 16px;
+  padding: 8px 16px;
 }
 .app-header h1 {
   font-size: 40px;
-  margin: 10px 0 0;
+  margin: 20px 0 0;
   font-weight: 700;
 }
 .app-footer small { color: var(--muted); }
@@ -117,7 +117,7 @@ body {
 .hint {
   color: var(--muted);
   font-size: 14px;
-  margin: 14px 0 0;
+  margin: 0;
 }
 
 @media (min-width: 480px) {
