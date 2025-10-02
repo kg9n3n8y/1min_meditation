@@ -3,6 +3,8 @@
   const phaseLabel = document.getElementById('phaseLabel');
   const countdownLabel = document.getElementById('countdownLabel');
   const progressRing = document.getElementById('progressRing');
+  const timerCard = document.querySelector('.timer-card');
+  const copyUrlBtn = document.getElementById('copyUrlBtn');
 
   const ONE_SECOND_MS = 1000;
   const sets = 3;
@@ -278,7 +280,39 @@
     }
   }
 
-  startButton.addEventListener('click', onButtonClick, { passive: true });
+  startButton.addEventListener('click', (e) => { e.stopPropagation(); onButtonClick(); }, { passive: true });
+  timerCard.addEventListener('click', onButtonClick, { passive: true });
+  timerCard.tabIndex = 0;
+  timerCard.setAttribute('role', 'button');
+  timerCard.setAttribute('aria-label', 'タイマーの開始と停止');
+  timerCard.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onButtonClick();
+    }
+  });
+
+  // クリップボードコピー
+  if (copyUrlBtn) {
+    copyUrlBtn.addEventListener('click', async () => {
+      const url = 'https://kg9n3n8y.github.io/1min_meditation/';
+      try {
+        await navigator.clipboard.writeText(url);
+        copyUrlBtn.textContent = 'コピーしたよ!';
+        setTimeout(() => { copyUrlBtn.textContent = 'URLをコピー'; }, 1500);
+      } catch (_) {
+        // 古いブラウザ向けフォールバック
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (_) {}
+        document.body.removeChild(ta);
+        copyUrlBtn.textContent = 'コピーしたよ!';
+        setTimeout(() => { copyUrlBtn.textContent = 'URLをコピー'; }, 1500);
+      }
+    }, { passive: true });
+  }
 
   // PWA: Service Worker Registration
   if ('serviceWorker' in navigator) {
