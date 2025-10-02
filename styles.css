@@ -25,7 +25,7 @@ body {
 }
 .app-header h1 {
   font-size: 40px;
-  margin: 20px 0 0;
+  margin: 30px 0 0;
   font-weight: 700;
 }
 .app-footer small { color: var(--muted); }
@@ -44,7 +44,6 @@ body {
   display: grid;
   place-items: center;
   padding: 16px;
-  flex: 1;
 }
 
 .timer-card {
@@ -117,7 +116,7 @@ body {
 .hint {
   color: var(--muted);
   font-size: 14px;
-  margin: 0;
+  margin: 16px 0 0;
 }
 
 @media (min-width: 480px) {
