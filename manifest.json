@@ -1,0 +1,19 @@
+{
+  "name": "1分瞑想",
+  "short_name": "1分瞑想",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0b1220",
+  "theme_color": "#0ea5e9",
+  "description": "4-8-8の呼吸で1分の瞑想をサポートするPWA",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+
+
