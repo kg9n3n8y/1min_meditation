@@ -1,43 +1,161 @@
+/* app.js (iOS PWA 2回目起動で無反応になる問題の修正版)
+   主要変更点
+   - bfcache 復帰 (pageshow.persisted) と PWA 再起動を検知して状態を再初期化
+   - AudioContext が復帰時に resume できない/closed になるSafari対策として再生成
+   - 「一度限り(once:true)」のunlock用 pointerdown リスナーを復帰時に再付与
+   - iOS PWA では alert を出さず非同期処理をブロックしない
+*/
+
 (() => {
-  const startButton = document.getElementById('startButton');
-  const phaseLabel = document.getElementById('phaseLabel');
-  const countdownLabel = document.getElementById('countdownLabel');
-  const progressRing = document.getElementById('progressRing');
-  const timerCard = document.querySelector('.timer-card');
-  const copyUrlBtn = document.getElementById('copyUrlBtn');
+  // ---- ユーティリティ & 環境判定 ----
+  const ua = navigator.userAgent || "";
+  const isIOS = /iP(hone|od|ad)/.test(ua);
+  const isStandalone =
+    window.matchMedia("(display-mode: standalone)").matches ||
+    (navigator && navigator.standalone);
 
   const ONE_SECOND_MS = 1000;
-  const sets = 3;
-  const basePattern = [
-    { label: '吸う', duration: 4, key: 'inhale' },
-    { label: '止める', duration: 8, key: 'hold' },
-    { label: '吐く', duration: 8, key: 'exhale' },
-  ];
 
-  const pattern = Array.from({ length: sets }).flatMap(() => basePattern);
-  const totalSeconds = pattern.reduce((s, p) => s + p.duration, 0);
+  // ---- 状態変数（bfcache復帰でも生き残る可能性があるので pageshow で都度リセットする）----
+  let dom = {
+    startButton: null,
+    phaseLabel: null,
+    countdownLabel: null,
+    progressRing: null,
+    timerCard: null,
+    copyUrlBtn: null,
+  };
 
   let isRunning = false;
   let currentIndex = 0;
   let phaseEndTs = 0;
   let timerRaf = 0;
   let totalStartTs = 0;
-  let audioCtx = null;
 
-  function updateProgress(totalElapsedSec) {
-    const progressDeg = Math.min(360, (totalElapsedSec / totalSeconds) * 360);
-    progressRing.style.background = `conic-gradient(var(--accent) ${progressDeg}deg, rgba(255,255,255,0.08) ${progressDeg}deg)`;
+  let audioCtx = null;
+  let audioUnlocked = false;
+  let htmlSilentAudio = null;
+
+  // タイマー・シーケンス
+  const sets = 3;
+  const basePattern = [
+    { label: "吸う", duration: 4, key: "inhale" },
+    { label: "止める", duration: 8, key: "hold" },
+    { label: "吐く", duration: 8, key: "exhale" },
+  ];
+  const pattern = Array.from({ length: sets }).flatMap(() => basePattern);
+  const totalSeconds = pattern.reduce((s, p) => s + p.duration, 0);
+
+  // ---- AudioContext 管理 ----
+  function createAudioCtx() {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    if (isIOS) {
+      try {
+        return new Ctx({ sampleRate: 48000, latencyHint: "interactive" });
+      } catch (_) {
+        try {
+          return new Ctx();
+        } catch {
+          return null;
+        }
+      }
+    }
+    try {
+      return new Ctx();
+    } catch {
+      return null;
+    }
   }
 
-  // ====== WebAudio 合成音（おりん風/手拍子）======
   function getAudioCtx() {
     if (!audioCtx) {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (Ctx) audioCtx = new Ctx();
+      audioCtx = createAudioCtx();
+      bindStateChangeForAudioCtx(audioCtx);
     }
     return audioCtx;
   }
 
+  function bindStateChangeForAudioCtx(ctx) {
+    if (!ctx) return;
+    // Safariで復帰時にsuspended/実質deadになるのを検知
+    ctx.onstatechange = async () => {
+      if (!ctx) return;
+      if (ctx.state === "suspended") {
+        try {
+          await ctx.resume();
+        } catch (_) {
+          // 再開に失敗したら作り直しフラグ
+          tryCloseAudioCtx();
+          audioCtx = null;
+          audioUnlocked = false;
+        }
+      } else if (ctx.state === "closed") {
+        audioCtx = null;
+        audioUnlocked = false;
+      }
+    };
+  }
+
+  function tryCloseAudioCtx() {
+    if (audioCtx) {
+      try {
+        // iOSで close() が例外になるケースがあるため try/catch
+        audioCtx.close && audioCtx.close();
+      } catch (_) {}
+    }
+  }
+
+  // ---- オーディオ解錠（unlock） ----
+  function ensureHtmlSilentAudio() {
+    if (htmlSilentAudio) return htmlSilentAudio;
+    // 0.1秒の超短無音WAV
+    const SILENT_WAV_100MS =
+      "data:audio/wav;base64," +
+      "UklGRgQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAAA";
+    const a = new Audio(SILENT_WAV_100MS);
+    a.muted = true;
+    a.loop = false;
+    a.preload = "auto";
+    a.setAttribute("playsinline", "");
+    htmlSilentAudio = a;
+    return a;
+  }
+
+  function playSilentTick(ctx, durSec = 0.06) {
+    try {
+      const frames = Math.max(1, Math.floor(ctx.sampleRate * durSec));
+      const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      const g = ctx.createGain();
+      g.gain.value = 0.001;
+      src.connect(g).connect(ctx.destination);
+      const t0 = ctx.currentTime;
+      src.start(t0);
+      src.stop(t0 + durSec);
+    } catch (_) {}
+  }
+
+  async function unlockAudioRoute() {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    try {
+      await ctx.resume();
+    } catch (_) {}
+    playSilentTick(ctx);
+
+    try {
+      const el = ensureHtmlSilentAudio();
+      await el.play();
+      el.pause();
+      el.currentTime = 0;
+    } catch (_) {}
+
+    audioUnlocked = true;
+  }
+
+  // ---- サウンド合成 ----
   function playOrin(kind) {
     const ctx = getAudioCtx();
     if (!ctx) return;
@@ -47,57 +165,59 @@
     master.gain.setValueAtTime(0.0001, now);
     master.connect(ctx.destination);
 
-    // フェーズ別に音程を切り替え（吸う=高め、止める=中間、吐く=低め）
     let baseHz;
-    if (kind === 'inhale' || kind === 'start') baseHz = 1100; // 高め
-    else if (kind === 'hold') baseHz = 950;                    // 中間
-    else if (kind === 'exhale') baseHz = 820;                  // 低め
-    else baseHz = 950;                                        // デフォルト
+    if (kind === "inhale" || kind === "start") baseHz = 1100;
+    else if (kind === "hold") baseHz = 950;
+    else if (kind === "exhale") baseHz = 820;
+    else baseHz = 950;
 
-    // 余韻・音量は一定（開始も切替も同質感で）
-    const tail = 3.2;  // 秒
-    const peak = 0.45; // 音量感 (0.30 * 1.5)
+    const tail = 3.2;
+    const peak = 0.45;
 
-    // 打撃ノイズ（励起）
+    // strike noise
     const burstDur = 0.012;
     const noise = ctx.createBufferSource();
-    const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * burstDur), ctx.sampleRate);
+    const buf = ctx.createBuffer(
+      1,
+      Math.floor(ctx.sampleRate * burstDur),
+      ctx.sampleRate
+    );
     const ch = buf.getChannelData(0);
-    for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ch.length * 0.65));
+    for (let i = 0; i < ch.length; i++)
+      ch[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ch.length * 0.65));
     noise.buffer = buf;
 
     const hp = ctx.createBiquadFilter();
-    hp.type = 'highpass';
+    hp.type = "highpass";
     hp.frequency.value = 300;
     const strike = ctx.createGain();
     strike.gain.setValueAtTime(peak * 0.7 * 1.5, now);
     strike.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
     noise.connect(hp).connect(strike).connect(master);
 
-    // モーダル共振（不整比の帯域通過）
     const modalBus = ctx.createGain();
     modalBus.gain.value = 1.0;
     const outEQ = ctx.createBiquadFilter();
-    outEQ.type = 'highshelf';
+    outEQ.type = "highshelf";
     outEQ.frequency.value = 3500;
-    outEQ.gain.value = 3; // きらめき付与
+    outEQ.gain.value = 3;
     modalBus.connect(outEQ).connect(master);
 
     const modes = [
-      { r: 0.99, q: 25, g: 1.00, d: tail },
+      { r: 0.99, q: 25, g: 1.0, d: tail },
       { r: 2.01, q: 28, g: 0.55, d: tail * 0.9 },
       { r: 2.32, q: 26, g: 0.42, d: tail * 0.85 },
       { r: 2.74, q: 24, g: 0.36, d: tail * 0.8 },
       { r: 3.76, q: 22, g: 0.28, d: tail * 0.7 },
       { r: 4.07, q: 20, g: 0.22, d: tail * 0.6 },
-      { r: 6.80, q: 18, g: 0.15, d: tail * 0.5 }
+      { r: 6.80, q: 18, g: 0.15, d: tail * 0.5 },
     ];
 
     const excite = ctx.createBufferSource();
     excite.buffer = buf;
     modes.forEach((m) => {
       const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass';
+      bp.type = "bandpass";
       bp.frequency.value = baseHz * m.r;
       bp.Q.value = m.q;
       const g = ctx.createGain();
@@ -106,20 +226,19 @@
       excite.connect(bp).connect(g).connect(modalBus);
     });
 
-    // 加算合成の倍音群（微妙にデチューン＆減衰）
     const partials = [
       { r: 1.0, g: 0.35, d: tail * 1.0 },
       { r: 2.01, g: 0.22, d: tail * 0.9 },
       { r: 2.74, g: 0.15, d: tail * 0.8 },
-      { r: 3.76, g: 0.10, d: tail * 0.7 }
+      { r: 3.76, g: 0.1, d: tail * 0.7 },
     ];
     partials.forEach((p) => {
       const osc = ctx.createOscillator();
-      osc.type = 'sine';
-      const cents = (Math.random() * 6 - 3); // ±3cents
+      osc.type = "sine";
+      const cents = Math.random() * 6 - 3;
       const detune = Math.pow(2, cents / 1200);
       const startF = baseHz * p.r * detune;
-      const endF = startF * 0.985; // わずかなピッチダウン
+      const endF = startF * 0.985;
       osc.frequency.setValueAtTime(startF, now);
       osc.frequency.exponentialRampToValueAtTime(endF, now + p.d);
       const g = ctx.createGain();
@@ -130,7 +249,6 @@
       osc.stop(now + p.d + 0.05);
     });
 
-    // 初期反射（短ディレイ）で部屋鳴り風
     try {
       const early = ctx.createDelay(0.2);
       early.delayTime.value = 0.028;
@@ -139,11 +257,9 @@
       master.connect(early).connect(eGain).connect(ctx.destination);
     } catch (_) {}
 
-    // マスターのフェード
     master.gain.exponentialRampToValueAtTime(peak * 1.5, now + 0.012);
     master.gain.exponentialRampToValueAtTime(0.0001, now + tail + 0.35);
 
-    // 再生
     noise.start(now);
     noise.stop(now + burstDur);
     excite.start(now);
@@ -159,19 +275,19 @@
     master.gain.setValueAtTime(0.0001, now);
     master.connect(ctx.destination);
 
-    // 手拍子っぽい短いノイズ＋帯域整形
     const dur = 0.12;
     const src = ctx.createBufferSource();
     const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
     const ch = buf.getChannelData(0);
-    for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ch.length * 0.6));
+    for (let i = 0; i < ch.length; i++)
+      ch[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ch.length * 0.6));
     src.buffer = buf;
 
     const hp = ctx.createBiquadFilter();
-    hp.type = 'highpass';
+    hp.type = "highpass";
     hp.frequency.value = 800;
     const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
+    lp.type = "lowpass";
     lp.frequency.value = 6000;
 
     const body = ctx.createGain();
@@ -179,10 +295,9 @@
     body.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
 
     src.connect(hp).connect(lp).connect(body).connect(master);
-    master.gain.exponentialRampToValueAtTime(0.63 * 1.5, now + 0.005); // 70% * 1.5
+    master.gain.exponentialRampToValueAtTime(0.63 * 1.5, now + 0.005);
     master.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
 
-    // ダブルクラップ風に軽いエコー
     try {
       const delay = ctx.createDelay(0.3);
       delay.delayTime.value = 0.06;
@@ -196,8 +311,14 @@
   }
 
   function playGuide(kind) {
-    if (kind === 'end') return playClap();
+    if (kind === "end") return playClap();
     return playOrin(kind);
+  }
+
+  // ---- UI & タイマー ----
+  function updateProgress(totalElapsedSec) {
+    const progressDeg = Math.min(360, (totalElapsedSec / totalSeconds) * 360);
+    dom.progressRing.style.background = `conic-gradient(var(--accent) ${progressDeg}deg, rgba(255,255,255,0.08) ${progressDeg}deg)`;
   }
 
   function formatSec(sec) {
@@ -210,7 +331,7 @@
     updateProgress(totalElapsedSec);
 
     const remainingCurrent = (phaseEndTs - now) / ONE_SECOND_MS;
-    countdownLabel.textContent = formatSec(remainingCurrent);
+    dom.countdownLabel.textContent = formatSec(remainingCurrent);
 
     if (remainingCurrent <= 0) {
       currentIndex += 1;
@@ -219,7 +340,7 @@
         return;
       }
       const nextPhase = pattern[currentIndex];
-      phaseLabel.textContent = `${nextPhase.label}`;
+      dom.phaseLabel.textContent = `${nextPhase.label}`;
       phaseEndTs = now + nextPhase.duration * ONE_SECOND_MS;
       playGuide(nextPhase.key);
     }
@@ -230,64 +351,86 @@
   function start() {
     if (isRunning) return;
     isRunning = true;
-    startButton.textContent = '停止';
-    startButton.setAttribute('aria-label', 'タイマー停止');
+    dom.startButton.textContent = "停止";
+    dom.startButton.setAttribute("aria-label", "タイマー停止");
     currentIndex = 0;
     totalStartTs = performance.now();
     const first = pattern[currentIndex];
-    phaseLabel.textContent = `${first.label}`;
+    dom.phaseLabel.textContent = `${first.label}`;
     phaseEndTs = totalStartTs + first.duration * ONE_SECOND_MS;
-    countdownLabel.textContent = String(first.duration);
+    dom.countdownLabel.textContent = String(first.duration);
     updateProgress(0);
     timerRaf = requestAnimationFrame(loop);
     tryVibrate(30);
-    // 最初のフェーズは吸うなので高めの音程
-    playGuide('inhale');
+    playGuide("inhale");
   }
 
   function reset() {
     isRunning = false;
     cancelAnimationFrame(timerRaf);
-    startButton.textContent = 'はじめる';
-    startButton.setAttribute('aria-label', 'タイマー開始');
-    phaseLabel.textContent = 'タップで開始';
-    countdownLabel.textContent = String(totalSeconds);
-    progressRing.style.background = 'conic-gradient(var(--accent) 0deg, rgba(255,255,255,0.08) 0deg)';
+    dom.startButton.textContent = "はじめる";
+    dom.startButton.setAttribute("aria-label", "タイマー開始");
+    dom.phaseLabel.textContent = "タップで開始";
+    dom.countdownLabel.textContent = String(totalSeconds);
+    dom.progressRing.style.background =
+      "conic-gradient(var(--accent) 0deg, rgba(255,255,255,0.08) 0deg)";
   }
 
   function finish() {
     tryVibrate([40, 60, 40]);
-    playGuide('end');
-    // alertを遅延させて音声再生を完了させる
-    setTimeout(() => {
-      alert('おつかれさま!1分の瞑想が終わったよ。');
-      reset();
-    }, 500);
+    playGuide("end");
+    // iOS PWAでは alert が復帰時の挙動を壊すことがあるため回避
+    if (!(isIOS && isStandalone)) {
+      setTimeout(() => {
+        alert("おつかれさま! 1分の瞑想が終わったよ。");
+      }, 500);
+    }
+    setTimeout(reset, 500);
   }
 
   function tryVibrate(pattern) {
     if (navigator.vibrate) {
-      try { navigator.vibrate(pattern); } catch (_) {}
+      try {
+        navigator.vibrate(pattern);
+      } catch (_) {}
     }
   }
 
-  function onButtonClick() {
-    // ユーザー操作をトリガーにAudioContextを初期化・再開
+  // ---- ユーザー操作/解錠フロー ----
+  async function onUserGesturePriming() {
+    // AudioContextが死んでいる/閉じている可能性を考慮して再作成
+    if (!audioCtx || audioCtx.state === "closed") {
+      audioCtx = createAudioCtx();
+      bindStateChangeForAudioCtx(audioCtx);
+      audioUnlocked = false;
+    }
+    if (!audioUnlocked) {
+      await unlockAudioRoute();
+    } else {
+      // 念押し：Safariの幽霊suspend対策
+      try {
+        await getAudioCtx()?.resume();
+      } catch (_) {}
+    }
+  }
+
+  async function onButtonClick(e) {
+    // 念のため
+    e && e.stopPropagation();
+    await onUserGesturePriming();
+
     const ctx = getAudioCtx();
-    if (ctx && ctx.state === 'suspended') {
-      ctx.resume().then(() => {
-        console.log('AudioContext resumed successfully');
-        // resume後、確実に音が出るようテストトーンを鳴らす(iOS/Bluetooth対策)
-        // 無音に近い短い音で初期化
-        const testOsc = ctx.createOscillator();
-        const testGain = ctx.createGain();
-        testGain.gain.value = 0.001;
-        testOsc.connect(testGain).connect(ctx.destination);
-        testOsc.start(ctx.currentTime);
-        testOsc.stop(ctx.currentTime + 0.01);
-      }).catch(e => {
-        console.error('Failed to resume AudioContext:', e);
-      });
+    if (ctx && ctx.state !== "running") {
+      try {
+        await ctx.resume();
+      } catch (_) {
+        // 再開不可なら作り直す
+        tryCloseAudioCtx();
+        audioCtx = createAudioCtx();
+        bindStateChangeForAudioCtx(audioCtx);
+        await unlockAudioRoute();
+      }
+      playSilentTick(getAudioCtx());
     }
 
     if (isRunning) {
@@ -297,44 +440,157 @@
     }
   }
 
-  startButton.addEventListener('click', (e) => { e.stopPropagation(); onButtonClick(); }, { passive: true });
-  timerCard.addEventListener('click', onButtonClick, { passive: true });
-  timerCard.tabIndex = 0;
-  timerCard.setAttribute('role', 'button');
-  timerCard.setAttribute('aria-label', 'タイマーの開始と停止');
-  timerCard.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      onButtonClick();
-    }
-  });
-
-  // クリップボードコピー
-  if (copyUrlBtn) {
-    copyUrlBtn.addEventListener('click', async () => {
-      const url = 'https://kg9n3n8y.github.io/1min_meditation/';
-      try {
-        await navigator.clipboard.writeText(url);
-        copyUrlBtn.textContent = 'コピーしたよ!';
-        setTimeout(() => { copyUrlBtn.textContent = 'URLをコピー'; }, 1500);
-      } catch (_) {
-        // 古いブラウザ向けフォールバック
-        const ta = document.createElement('textarea');
-        ta.value = url;
-        document.body.appendChild(ta);
-        ta.select();
-        try { document.execCommand('copy'); } catch (_) {}
-        document.body.removeChild(ta);
-        copyUrlBtn.textContent = 'コピーしたよ!';
-        setTimeout(() => { copyUrlBtn.textContent = 'URLをコピー'; }, 1500);
-      }
-    }, { passive: true });
+  // ---- 復帰/離脱ハンドリング（bfcache & PWA） ----
+  function attachOneShotPointerUnlock() {
+    // 復帰のたびに once リスナーを再付与
+    window.addEventListener("pointerdown", onUserGesturePriming, {
+      passive: true,
+      once: true,
+    });
   }
 
-  // PWA: Service Worker Registration
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
-    });
+  function onPageShow(e) {
+    // bfcache からの復帰 or PWA再起動
+    // いずれでもオーディオ経路・UIを健全化
+    if (e && e.persisted) {
+      // bfcache復帰時：古い状態が残るので明示的に初期化
+      hardReinitState();
+    } else if (isIOS && isStandalone) {
+      // PWAはOS側復元でもJS状態が不整合になりやすいので毎回クリーンに
+      softReinitState();
+    }
+    // 解錠用 once リスナーを毎回付け直し
+    attachOneShotPointerUnlock();
+  }
+
+  function onPageHide() {
+    // 次回復帰時のためにクリーンアップ（bfcache行きでも問題なし）
+    cancelAnimationFrame(timerRaf);
+    isRunning = false;
+    // 既存AudioContextは次回のために破棄（Safariでの「再開不能」個体差対策）
+    tryCloseAudioCtx();
+    audioCtx = null;
+    audioUnlocked = false;
+  }
+
+  function onVisibilityChange() {
+    if (!document.hidden) {
+      // 画面復帰時に再解錠トライ
+      unlockAudioRoute();
+    }
+  }
+
+  // ---- 初期化 & 再初期化 ----
+  function queryDom() {
+    dom.startButton = document.getElementById("startButton");
+    dom.phaseLabel = document.getElementById("phaseLabel");
+    dom.countdownLabel = document.getElementById("countdownLabel");
+    dom.progressRing = document.getElementById("progressRing");
+    dom.timerCard = document.querySelector(".timer-card");
+    dom.copyUrlBtn = document.getElementById("copyUrlBtn");
+  }
+
+  function bindUI() {
+    // 既存のハンドラ多重付与を防ぐため一度解除してから付与
+    if (dom.startButton) {
+      dom.startButton.removeEventListener("click", onButtonClick);
+      dom.startButton.addEventListener("click", onButtonClick, { passive: true });
+    }
+    if (dom.timerCard) {
+      dom.timerCard.removeEventListener("click", onButtonClick);
+      dom.timerCard.addEventListener("click", onButtonClick, { passive: true });
+
+      dom.timerCard.tabIndex = 0;
+      dom.timerCard.setAttribute("role", "button");
+      dom.timerCard.setAttribute("aria-label", "タイマーの開始と停止");
+
+      // keydown は多重付与防止のため一度解除
+      const keyHandler = (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onButtonClick(e);
+        }
+      };
+      dom.timerCard.removeEventListener("keydown", keyHandler);
+      dom.timerCard.addEventListener("keydown", keyHandler);
+    }
+
+    if (dom.copyUrlBtn) {
+      const copyHandler = async () => {
+        const url = "https://kg9n3n8y.github.io/1min_meditation/";
+        try {
+          await navigator.clipboard.writeText(url);
+          dom.copyUrlBtn.textContent = "コピーしたよ!";
+          setTimeout(() => {
+            dom.copyUrlBtn.textContent = "URLをコピー";
+          }, 1500);
+        } catch (_) {
+          const ta = document.createElement("textarea");
+          ta.value = url;
+          document.body.appendChild(ta);
+          ta.select();
+          try {
+            document.execCommand("copy");
+          } catch (_) {}
+          document.body.removeChild(ta);
+          dom.copyUrlBtn.textContent = "コピーしたよ!";
+          setTimeout(() => {
+            dom.copyUrlBtn.textContent = "URLをコピー";
+          }, 1500);
+        }
+      };
+      dom.copyUrlBtn.removeEventListener("click", copyHandler);
+      dom.copyUrlBtn.addEventListener("click", copyHandler, { passive: true });
+    }
+  }
+
+  function initVisual() {
+    // 初期表示を常に整える
+    reset();
+  }
+
+  function softReinitState() {
+    // DOMはそのままに、Audio/ランタイム状態のみ整える
+    cancelAnimationFrame(timerRaf);
+    isRunning = false;
+    audioUnlocked = false;
+    tryCloseAudioCtx();
+    audioCtx = null;
+    initVisual();
+  }
+
+  function hardReinitState() {
+    // DOM参照も取り直し、イベント再バインド
+    queryDom();
+    bindUI();
+    softReinitState();
+  }
+
+  function bootstrap() {
+    queryDom();
+    bindUI();
+    initVisual();
+
+    // PWA: Service Worker Registration
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js").catch(() => {});
+      });
+    }
+
+    // ライフサイクル
+    window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    // 起動直後の解錠 once を付与
+    attachOneShotPointerUnlock();
+  }
+
+  // DOM 準備後に起動
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bootstrap, { once: true });
+  } else {
+    bootstrap();
   }
 })();
