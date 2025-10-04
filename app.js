@@ -56,7 +56,7 @@
 
     // 余韻・音量は一定（開始も切替も同質感で）
     const tail = 3.2;  // 秒
-    const peak = 0.30; // 音量感
+    const peak = 0.45; // 音量感 (0.30 * 1.5)
 
     // 打撃ノイズ（励起）
     const burstDur = 0.012;
@@ -70,7 +70,7 @@
     hp.type = 'highpass';
     hp.frequency.value = 300;
     const strike = ctx.createGain();
-    strike.gain.setValueAtTime(peak * 0.7, now);
+    strike.gain.setValueAtTime(peak * 0.7 * 1.5, now);
     strike.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
     noise.connect(hp).connect(strike).connect(master);
 
@@ -101,7 +101,7 @@
       bp.frequency.value = baseHz * m.r;
       bp.Q.value = m.q;
       const g = ctx.createGain();
-      g.gain.setValueAtTime(peak * m.g, now);
+      g.gain.setValueAtTime(peak * m.g * 1.5, now);
       g.gain.exponentialRampToValueAtTime(0.0001, now + m.d);
       excite.connect(bp).connect(g).connect(modalBus);
     });
@@ -123,7 +123,7 @@
       osc.frequency.setValueAtTime(startF, now);
       osc.frequency.exponentialRampToValueAtTime(endF, now + p.d);
       const g = ctx.createGain();
-      g.gain.setValueAtTime(p.g * peak, now + 0.005);
+      g.gain.setValueAtTime(p.g * peak * 1.5, now + 0.005);
       g.gain.exponentialRampToValueAtTime(0.0001, now + p.d);
       osc.connect(g).connect(master);
       osc.start(now + 0.002);
@@ -140,7 +140,7 @@
     } catch (_) {}
 
     // マスターのフェード
-    master.gain.exponentialRampToValueAtTime(peak, now + 0.012);
+    master.gain.exponentialRampToValueAtTime(peak * 1.5, now + 0.012);
     master.gain.exponentialRampToValueAtTime(0.0001, now + tail + 0.35);
 
     // 再生
@@ -175,11 +175,11 @@
     lp.frequency.value = 6000;
 
     const body = ctx.createGain();
-    body.gain.setValueAtTime(0.9, now);
+    body.gain.setValueAtTime(0.9 * 1.5, now);
     body.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
 
     src.connect(hp).connect(lp).connect(body).connect(master);
-    master.gain.exponentialRampToValueAtTime(0.63, now + 0.005); // 70%
+    master.gain.exponentialRampToValueAtTime(0.63 * 1.5, now + 0.005); // 70% * 1.5
     master.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
 
     // ダブルクラップ風に軽いエコー
@@ -187,7 +187,7 @@
       const delay = ctx.createDelay(0.3);
       delay.delayTime.value = 0.06;
       const g = ctx.createGain();
-      g.gain.value = 0.4;
+      g.gain.value = 0.4 * 1.5;
       body.connect(delay).connect(g).connect(master);
     } catch (_) {}
 

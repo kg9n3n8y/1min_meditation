@@ -22,10 +22,8 @@ body {
 }
 
 html {
-  background: var(--bg);
-  /* または、bodyと同じグラデーション背景を設定 */
   background: radial-gradient(1200px 800px at 70% -10%, #0b2a42, var(--bg));
-  /* background-attachment: fixed; */
+  background-attachment: fixed;
 }
 
 .app-header, .app-footer {
