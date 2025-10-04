@@ -15,6 +15,8 @@
     (navigator && navigator.standalone);
 
   const ONE_SECOND_MS = 1000;
+  const AUDIO_RESUME_TIMEOUT_MS = 450;
+  const PRIMING_WAIT_LIMIT_MS = 500;
 
   // ---- 状態変数（bfcache復帰でも生き残る可能性があるので pageshow で都度リセットする）----
   let dom = {
@@ -137,22 +139,85 @@
     } catch (_) {}
   }
 
-  async function unlockAudioRoute() {
-    const ctx = getAudioCtx();
-    if (!ctx) return;
+  function waitWithTimeout(promise, timeoutMs) {
+    if (!promise || typeof promise.then !== "function") {
+      return Promise.resolve(true);
+    }
+    let finished = false;
+    return new Promise((resolve) => {
+      const finish = (result) => {
+        if (finished) return;
+        finished = true;
+        resolve(result);
+      };
+      promise.then(
+        () => finish(true),
+        () => finish(false)
+      );
+      setTimeout(() => finish(false), timeoutMs);
+    });
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function attemptResume(ctx, timeoutMs = AUDIO_RESUME_TIMEOUT_MS) {
+    if (!ctx || typeof ctx.resume !== "function") return false;
     try {
-      await ctx.resume();
-    } catch (_) {}
-    playSilentTick(ctx);
+      return await waitWithTimeout(ctx.resume(), timeoutMs);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function ensureCtxRunning(ctx, timeoutMs = AUDIO_RESUME_TIMEOUT_MS) {
+    if (!ctx) return false;
+    if (ctx.state === "running") return true;
+    const resumed = await attemptResume(ctx, timeoutMs);
+    return resumed || ctx.state === "running";
+  }
+
+  function rebuildAudioCtx() {
+    tryCloseAudioCtx();
+    audioCtx = createAudioCtx();
+    bindStateChangeForAudioCtx(audioCtx);
+    audioUnlocked = false;
+    return audioCtx;
+  }
+
+  async function unlockAudioRoute(
+    ctx = getAudioCtx(),
+    { timeoutMs = AUDIO_RESUME_TIMEOUT_MS, skipResume = false } = {}
+  ) {
+    const targetCtx = ctx || getAudioCtx();
+    if (!targetCtx) {
+      audioUnlocked = false;
+      return false;
+    }
+
+    const running =
+      skipResume && targetCtx.state === "running"
+        ? true
+        : await ensureCtxRunning(targetCtx, timeoutMs);
+
+    if (!running) {
+      audioUnlocked = false;
+      return false;
+    }
+
+    playSilentTick(targetCtx);
 
     try {
       const el = ensureHtmlSilentAudio();
-      await el.play();
+      const playResult = typeof el.play === "function" ? el.play() : null;
+      await waitWithTimeout(playResult, timeoutMs);
       el.pause();
       el.currentTime = 0;
     } catch (_) {}
 
     audioUnlocked = true;
+    return true;
   }
 
   // ---- サウンド合成 ----
@@ -400,37 +465,48 @@
   async function onUserGesturePriming() {
     // AudioContextが死んでいる/閉じている可能性を考慮して再作成
     if (!audioCtx || audioCtx.state === "closed") {
-      audioCtx = createAudioCtx();
-      bindStateChangeForAudioCtx(audioCtx);
-      audioUnlocked = false;
+      rebuildAudioCtx();
     }
+
+    let ctx = audioCtx;
+    if (!ctx) return;
+
+    let running = await ensureCtxRunning(ctx);
+    if (!running) {
+      ctx = rebuildAudioCtx();
+      if (!ctx) return;
+      running = await ensureCtxRunning(ctx);
+      if (!running) return;
+    }
+
     if (!audioUnlocked) {
-      await unlockAudioRoute();
+      await unlockAudioRoute(ctx, { skipResume: true });
     } else {
-      // 念押し：Safariの幽霊suspend対策
-      try {
-        await getAudioCtx()?.resume();
-      } catch (_) {}
+      await ensureCtxRunning(ctx);
     }
   }
 
   async function onButtonClick(e) {
     // 念のため
     e && e.stopPropagation();
-    await onUserGesturePriming();
+    const primingPromise = onUserGesturePriming();
+    primingPromise.catch(() => {});
+    await Promise.race([primingPromise, delay(PRIMING_WAIT_LIMIT_MS)]);
 
-    const ctx = getAudioCtx();
+    let ctx = getAudioCtx();
     if (ctx && ctx.state !== "running") {
-      try {
-        await ctx.resume();
-      } catch (_) {
-        // 再開不可なら作り直す
-        tryCloseAudioCtx();
-        audioCtx = createAudioCtx();
-        bindStateChangeForAudioCtx(audioCtx);
-        await unlockAudioRoute();
+      const running = await ensureCtxRunning(ctx);
+      if (!running) {
+        ctx = rebuildAudioCtx();
+        if (ctx) {
+          await unlockAudioRoute(ctx);
+        }
       }
-      playSilentTick(getAudioCtx());
+    }
+
+    ctx = getAudioCtx();
+    if (ctx && ctx.state === "running") {
+      playSilentTick(ctx);
     }
 
     if (isRunning) {
