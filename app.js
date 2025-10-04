@@ -33,16 +33,14 @@
   function getAudioCtx() {
     if (!audioCtx) {
       const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (Ctx) {
-        audioCtx = new Ctx();
-      }
+      if (Ctx) audioCtx = new Ctx();
     }
     return audioCtx;
   }
 
   function playOrin(kind) {
     const ctx = getAudioCtx();
-    if (!ctx || ctx.state !== 'running') return;
+    if (!ctx) return;
 
     const now = ctx.currentTime;
     const master = ctx.createGain();
@@ -154,7 +152,7 @@
 
   function playClap() {
     const ctx = getAudioCtx();
-    if (!ctx || ctx.state !== 'running') return;
+    if (!ctx) return;
 
     const now = ctx.currentTime;
     const master = ctx.createGain();
@@ -274,36 +272,28 @@
   }
 
   function onButtonClick() {
+    // ユーザー操作をトリガーにAudioContextを初期化・再開
     const ctx = getAudioCtx();
     if (ctx && ctx.state === 'suspended') {
       ctx.resume().then(() => {
-        // iOS/Bluetooth対策: resume後に無音に近い短い音を再生してオーディオを"起こす"
-        const silentSource = ctx.createBufferSource();
-        silentSource.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
-        silentSource.connect(ctx.destination);
-        silentSource.start(ctx.currentTime);
-        silentSource.stop(ctx.currentTime + 0.01);
-
-        if (isRunning) {
-          reset();
-        } else {
-          start();
-        }
+        console.log('AudioContext resumed successfully');
+        // resume後、確実に音が出るようテストトーンを鳴らす(iOS/Bluetooth対策)
+        // 無音に近い短い音で初期化
+        const testOsc = ctx.createOscillator();
+        const testGain = ctx.createGain();
+        testGain.gain.value = 0.001;
+        testOsc.connect(testGain).connect(ctx.destination);
+        testOsc.start(ctx.currentTime);
+        testOsc.stop(ctx.currentTime + 0.01);
       }).catch(e => {
         console.error('Failed to resume AudioContext:', e);
-        // resumeに失敗した場合でもUIのトグルは試みる
-        if (isRunning) {
-          reset();
-        } else {
-          start();
-        }
       });
+    }
+
+    if (isRunning) {
+      reset();
     } else {
-      if (isRunning) {
-        reset();
-      } else {
-        start();
-      }
+      start();
     }
   }
 
