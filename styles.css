@@ -90,7 +90,7 @@ html {
 }
 
 .phase {
-  font-size: 18px;
+  font-size: 24px;
   color: var(--accent-weak);
   letter-spacing: 0.08em;
 }
