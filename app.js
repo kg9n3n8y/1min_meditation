@@ -13,6 +13,7 @@
     { label: '止める', duration: 8, key: 'hold' },
     { label: '吐く', duration: 8, key: 'exhale' },
   ];
+
   const pattern = Array.from({ length: sets }).flatMap(() => basePattern);
   const totalSeconds = pattern.reduce((s, p) => s + p.duration, 0);
 
@@ -22,13 +23,6 @@
   let timerRaf = 0;
   let totalStartTs = 0;
   let audioCtx = null;
-
-  // --- iOS/PWA/Bluetooth 対策用フラグ/検出 ---
-  const ua = navigator.userAgent || '';
-  const isIOS = /iP(hone|od|ad)/.test(ua);
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator && window.navigator.standalone);
-  let audioUnlocked = false;
-  let htmlSilentAudio = null;
 
   function updateProgress(totalElapsedSec) {
     const progressDeg = Math.min(360, (totalElapsedSec / totalSeconds) * 360);
@@ -40,94 +34,33 @@
     if (!audioCtx) {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (Ctx) {
-        // iOSではBluetooth出力と相性の良い 48kHz を優先して試す
-        if (isIOS) {
-          try {
-            audioCtx = new Ctx({ sampleRate: 48000, latencyHint: 'interactive' });
-          } catch (_) {
-            audioCtx = new Ctx();
-          }
-        } else {
-          audioCtx = new Ctx();
-        }
+        audioCtx = new Ctx();
       }
     }
     return audioCtx;
   }
 
-  // --- 無音バッファ（WebAudio）を短く鳴らしてルートを開く ---
-  function playSilentTick(ctx, durSec = 0.06) {
-    try {
-      const frames = Math.max(1, Math.floor(ctx.sampleRate * durSec));
-      const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
-      const src = ctx.createBufferSource();
-      src.buffer = buffer;
-      const g = ctx.createGain();
-      // ほぼ無音（-60dB程度）
-      g.gain.value = 0.001;
-      src.connect(g).connect(ctx.destination);
-      const t0 = ctx.currentTime;
-      src.start(t0);
-      src.stop(t0 + durSec);
-    } catch (_) {}
-  }
-
-  // --- HTMLAudioの無音データを一瞬だけ再生（iOS PWA + Bluetoothで有効） ---
-  function ensureHtmlSilentAudio() {
-    if (htmlSilentAudio) return htmlSilentAudio;
-    // 0.1秒の無音WAV（8kHz, mono, PCM16）データURI
-    // 極小サイズかつ再生互換性が高い
-    const SILENT_WAV_100MS =
-      'data:audio/wav;base64,' +
-      'UklGRgQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAAA'; // 短い無音
-    const a = new Audio(SILENT_WAV_100MS);
-    a.muted = true;
-    a.loop = false;
-    a.preload = 'auto';
-    a.setAttribute('playsinline', '');
-    htmlSilentAudio = a;
-    return a;
-  }
-
-  async function unlockAudioRoute() {
-    const ctx = getAudioCtx();
-    if (!ctx) return;
-
-    try { await ctx.resume(); } catch (_) {}
-
-    // WebAudio無音チック
-    playSilentTick(ctx);
-
-    // HTMLAudioの無音もチョイ鳴らし（PWA + Bluetoothで効く）
-    try {
-      const el = ensureHtmlSilentAudio();
-      await el.play();
-      el.pause();
-      el.currentTime = 0;
-    } catch (_) {}
-
-    audioUnlocked = true;
-  }
-
-  // ====== 音の合成 ======
   function playOrin(kind) {
     const ctx = getAudioCtx();
-    if (!ctx) return;
+    if (!ctx || ctx.state !== 'running') return;
 
     const now = ctx.currentTime;
     const master = ctx.createGain();
     master.gain.setValueAtTime(0.0001, now);
     master.connect(ctx.destination);
 
+    // フェーズ別に音程を切り替え（吸う=高め、止める=中間、吐く=低め）
     let baseHz;
-    if (kind === 'inhale' || kind === 'start') baseHz = 1100;
-    else if (kind === 'hold') baseHz = 950;
-    else if (kind === 'exhale') baseHz = 820;
-    else baseHz = 950;
+    if (kind === 'inhale' || kind === 'start') baseHz = 1100; // 高め
+    else if (kind === 'hold') baseHz = 950;                    // 中間
+    else if (kind === 'exhale') baseHz = 820;                  // 低め
+    else baseHz = 950;                                        // デフォルト
 
-    const tail = 3.2;
-    const peak = 0.45;
+    // 余韻・音量は一定（開始も切替も同質感で）
+    const tail = 3.2;  // 秒
+    const peak = 0.45; // 音量感 (0.30 * 1.5)
 
+    // 打撃ノイズ（励起）
     const burstDur = 0.012;
     const noise = ctx.createBufferSource();
     const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * burstDur), ctx.sampleRate);
@@ -143,12 +76,13 @@
     strike.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
     noise.connect(hp).connect(strike).connect(master);
 
+    // モーダル共振（不整比の帯域通過）
     const modalBus = ctx.createGain();
     modalBus.gain.value = 1.0;
     const outEQ = ctx.createBiquadFilter();
     outEQ.type = 'highshelf';
     outEQ.frequency.value = 3500;
-    outEQ.gain.value = 3;
+    outEQ.gain.value = 3; // きらめき付与
     modalBus.connect(outEQ).connect(master);
 
     const modes = [
@@ -174,6 +108,7 @@
       excite.connect(bp).connect(g).connect(modalBus);
     });
 
+    // 加算合成の倍音群（微妙にデチューン＆減衰）
     const partials = [
       { r: 1.0, g: 0.35, d: tail * 1.0 },
       { r: 2.01, g: 0.22, d: tail * 0.9 },
@@ -183,10 +118,10 @@
     partials.forEach((p) => {
       const osc = ctx.createOscillator();
       osc.type = 'sine';
-      const cents = (Math.random() * 6 - 3);
+      const cents = (Math.random() * 6 - 3); // ±3cents
       const detune = Math.pow(2, cents / 1200);
       const startF = baseHz * p.r * detune;
-      const endF = startF * 0.985;
+      const endF = startF * 0.985; // わずかなピッチダウン
       osc.frequency.setValueAtTime(startF, now);
       osc.frequency.exponentialRampToValueAtTime(endF, now + p.d);
       const g = ctx.createGain();
@@ -197,6 +132,7 @@
       osc.stop(now + p.d + 0.05);
     });
 
+    // 初期反射（短ディレイ）で部屋鳴り風
     try {
       const early = ctx.createDelay(0.2);
       early.delayTime.value = 0.028;
@@ -205,9 +141,11 @@
       master.connect(early).connect(eGain).connect(ctx.destination);
     } catch (_) {}
 
+    // マスターのフェード
     master.gain.exponentialRampToValueAtTime(peak * 1.5, now + 0.012);
     master.gain.exponentialRampToValueAtTime(0.0001, now + tail + 0.35);
 
+    // 再生
     noise.start(now);
     noise.stop(now + burstDur);
     excite.start(now);
@@ -216,13 +154,14 @@
 
   function playClap() {
     const ctx = getAudioCtx();
-    if (!ctx) return;
+    if (!ctx || ctx.state !== 'running') return;
 
     const now = ctx.currentTime;
     const master = ctx.createGain();
     master.gain.setValueAtTime(0.0001, now);
     master.connect(ctx.destination);
 
+    // 手拍子っぽい短いノイズ＋帯域整形
     const dur = 0.12;
     const src = ctx.createBufferSource();
     const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
@@ -242,9 +181,10 @@
     body.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
 
     src.connect(hp).connect(lp).connect(body).connect(master);
-    master.gain.exponentialRampToValueAtTime(0.63 * 1.5, now + 0.005);
+    master.gain.exponentialRampToValueAtTime(0.63 * 1.5, now + 0.005); // 70% * 1.5
     master.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
 
+    // ダブルクラップ風に軽いエコー
     try {
       const delay = ctx.createDelay(0.3);
       delay.delayTime.value = 0.06;
@@ -303,7 +243,8 @@
     updateProgress(0);
     timerRaf = requestAnimationFrame(loop);
     tryVibrate(30);
-    playGuide('inhale'); // 最初のフェーズ
+    // 最初のフェーズは吸うなので高めの音程
+    playGuide('inhale');
   }
 
   function reset() {
@@ -319,6 +260,7 @@
   function finish() {
     tryVibrate([40, 60, 40]);
     playGuide('end');
+    // alertを遅延させて音声再生を完了させる
     setTimeout(() => {
       alert('おつかれさま!1分の瞑想が終わったよ。');
       reset();
@@ -331,30 +273,40 @@
     }
   }
 
-  async function onUserGesturePriming() {
-    // PWA + iOS では必ず解錠を先に
-    if (!audioUnlocked) {
-      await unlockAudioRoute();
-    }
-  }
-
-  async function onButtonClick() {
-    await onUserGesturePriming();
-
+  function onButtonClick() {
     const ctx = getAudioCtx();
-    if (ctx && ctx.state !== 'running') {
-      try { await ctx.resume(); } catch (_) {}
-      playSilentTick(ctx);
-    }
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().then(() => {
+        // iOS/Bluetooth対策: resume後に無音に近い短い音を再生してオーディオを"起こす"
+        const silentSource = ctx.createBufferSource();
+        silentSource.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+        silentSource.connect(ctx.destination);
+        silentSource.start(ctx.currentTime);
+        silentSource.stop(ctx.currentTime + 0.01);
 
-    if (isRunning) {
-      reset();
+        if (isRunning) {
+          reset();
+        } else {
+          start();
+        }
+      }).catch(e => {
+        console.error('Failed to resume AudioContext:', e);
+        // resumeに失敗した場合でもUIのトグルは試みる
+        if (isRunning) {
+          reset();
+        } else {
+          start();
+        }
+      });
     } else {
-      start();
+      if (isRunning) {
+        reset();
+      } else {
+        start();
+      }
     }
   }
 
-  // --- ユーザー操作系 ---
   startButton.addEventListener('click', (e) => { e.stopPropagation(); onButtonClick(); }, { passive: true });
   timerCard.addEventListener('click', onButtonClick, { passive: true });
   timerCard.tabIndex = 0;
@@ -364,20 +316,6 @@
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       onButtonClick();
-    }
-  });
-  // iOSは pointerdown/touchend 直後の処理がもっとも「解錠」しやすい
-  window.addEventListener('pointerdown', onUserGesturePriming, { passive: true, once: true });
-
-  // 復帰時の再解錠（PWAでの再開/BT切替後など）
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && audioCtx) {
-      unlockAudioRoute();
-    }
-  });
-  window.addEventListener('pageshow', () => {
-    if (audioCtx) {
-      unlockAudioRoute();
     }
   });
 
@@ -390,6 +328,7 @@
         copyUrlBtn.textContent = 'コピーしたよ!';
         setTimeout(() => { copyUrlBtn.textContent = 'URLをコピー'; }, 1500);
       } catch (_) {
+        // 古いブラウザ向けフォールバック
         const ta = document.createElement('textarea');
         ta.value = url;
         document.body.appendChild(ta);
