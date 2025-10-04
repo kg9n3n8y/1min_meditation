@@ -273,6 +273,16 @@
   }
 
   function onButtonClick() {
+    // ユーザー操作をトリガーにAudioContextを初期化・再開
+    const ctx = getAudioCtx();
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().then(() => {
+        console.log('AudioContext resumed successfully');
+      }).catch(e => {
+        console.error('Failed to resume AudioContext:', e);
+      });
+    }
+
     if (isRunning) {
       reset();
     } else {
