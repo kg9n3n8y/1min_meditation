@@ -23,6 +23,7 @@
   let timerRaf = 0;
   let totalStartTs = 0;
   let audioCtx = null;
+  let audioReady = false; // AudioContextの準備完了フラグ
 
   function updateProgress(totalElapsedSec) {
     const progressDeg = Math.min(360, (totalElapsedSec / totalSeconds) * 360);
@@ -38,9 +39,41 @@
     return audioCtx;
   }
 
+  // Bluetooth対応: AudioContextを確実に初期化して準備完了まで待つ
+  async function ensureAudioReady() {
+    const ctx = getAudioCtx();
+    if (!ctx) return false;
+
+    try {
+      // suspendedの場合はresume
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+        console.log('AudioContext resumed successfully');
+      }
+
+      // Bluetooth機器への出力確立のため、より長いテストトーンを再生
+      const testOsc = ctx.createOscillator();
+      const testGain = ctx.createGain();
+      testGain.gain.value = 0.001; // 極小音量
+      testOsc.frequency.value = 440;
+      testOsc.connect(testGain).connect(ctx.destination);
+      testOsc.start(ctx.currentTime);
+      testOsc.stop(ctx.currentTime + 0.15); // 0.15秒に延長
+
+      // Bluetooth機器がストリームを受け付けるまで待機
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      audioReady = true;
+      return true;
+    } catch (e) {
+      console.error('Failed to initialize AudioContext:', e);
+      return false;
+    }
+  }
+
   function playOrin(kind) {
     const ctx = getAudioCtx();
-    if (!ctx) return;
+    if (!ctx || !audioReady) return;
 
     const now = ctx.currentTime;
     const master = ctx.createGain();
@@ -152,7 +185,7 @@
 
   function playClap() {
     const ctx = getAudioCtx();
-    if (!ctx) return;
+    if (!ctx || !audioReady) return;
 
     const now = ctx.currentTime;
     const master = ctx.createGain();
@@ -227,8 +260,14 @@
     timerRaf = requestAnimationFrame(loop);
   }
 
-  function start() {
+  async function start() {
     if (isRunning) return;
+    
+    // AudioContextの準備が完了していない場合は待つ
+    if (!audioReady) {
+      await ensureAudioReady();
+    }
+    
     isRunning = true;
     startButton.textContent = '停止';
     startButton.setAttribute('aria-label', 'タイマー停止');
@@ -241,8 +280,11 @@
     updateProgress(0);
     timerRaf = requestAnimationFrame(loop);
     tryVibrate(30);
-    // 最初のフェーズは吸うなので高めの音程
-    playGuide('inhale');
+    
+    // 最初のフェーズの音を少し遅延させてBluetooth出力を確実に
+    setTimeout(() => {
+      playGuide('inhale');
+    }, 50);
   }
 
   function reset() {
@@ -271,29 +313,14 @@
     }
   }
 
-  function onButtonClick() {
-    // ユーザー操作をトリガーにAudioContextを初期化・再開
-    const ctx = getAudioCtx();
-    if (ctx && ctx.state === 'suspended') {
-      ctx.resume().then(() => {
-        console.log('AudioContext resumed successfully');
-        // resume後、確実に音が出るようテストトーンを鳴らす(iOS/Bluetooth対策)
-        // 無音に近い短い音で初期化
-        const testOsc = ctx.createOscillator();
-        const testGain = ctx.createGain();
-        testGain.gain.value = 0.001;
-        testOsc.connect(testGain).connect(ctx.destination);
-        testOsc.start(ctx.currentTime);
-        testOsc.stop(ctx.currentTime + 0.01);
-      }).catch(e => {
-        console.error('Failed to resume AudioContext:', e);
-      });
-    }
+  async function onButtonClick() {
+    // ユーザー操作をトリガーにAudioContextを初期化
+    await ensureAudioReady();
 
     if (isRunning) {
       reset();
     } else {
-      start();
+      await start();
     }
   }
 
