@@ -241,10 +241,6 @@
     updateProgress(0);
     timerRaf = requestAnimationFrame(loop);
     tryVibrate(30);
-    try {
-      const ctx = getAudioCtx();
-      if (ctx && ctx.state === 'suspended') { ctx.resume(); }
-    } catch (_) {}
     // 最初のフェーズは吸うなので高めの音程
     playGuide('inhale');
   }
@@ -262,8 +258,11 @@
   function finish() {
     tryVibrate([40, 60, 40]);
     playGuide('end');
-    alert('おつかれさま！1分の瞑想が終わったよ。');
-    reset();
+    // alertを遅延させて音声再生を完了させる
+    setTimeout(() => {
+      alert('おつかれさま!1分の瞑想が終わったよ。');
+      reset();
+    }, 500);
   }
 
   function tryVibrate(pattern) {
@@ -278,6 +277,14 @@
     if (ctx && ctx.state === 'suspended') {
       ctx.resume().then(() => {
         console.log('AudioContext resumed successfully');
+        // resume後、確実に音が出るようテストトーンを鳴らす(iOS/Bluetooth対策)
+        // 無音に近い短い音で初期化
+        const testOsc = ctx.createOscillator();
+        const testGain = ctx.createGain();
+        testGain.gain.value = 0.001;
+        testOsc.connect(testGain).connect(ctx.destination);
+        testOsc.start(ctx.currentTime);
+        testOsc.stop(ctx.currentTime + 0.01);
       }).catch(e => {
         console.error('Failed to resume AudioContext:', e);
       });
@@ -331,5 +338,3 @@
     });
   }
 })();
-
-
