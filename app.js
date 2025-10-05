@@ -275,13 +275,6 @@
     }, { once: true, passive: true });
   });
 
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch((error) => {
-        console.warn('ServiceWorker registration failed:', error);
-      });
-    });
-  }
 
   function createGuideAudio() {
     let audioCtx = null;
