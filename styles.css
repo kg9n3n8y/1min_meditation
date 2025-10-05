@@ -20,7 +20,7 @@ html, body {
 body {
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Noto Sans JP, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
   color: var(--text);
-  background: radial-gradient(1200px 800px at 70% -10%, #0b2a42, var(--bg));
+  background: radial-gradient(1200px 800px at 50% -10%, #0b2a42, var(--bg));
   min-height: 100vh;
   min-height: 100dvh;
   display: flex;
@@ -34,7 +34,7 @@ body {
 }
 
 html {
-  background: radial-gradient(1200px 800px at 70% -10%, #0b2a42, var(--bg));
+  background: radial-gradient(1200px 800px at 50% -10%, #0b2a42, var(--bg));
   background-attachment: fixed;
 }
 
