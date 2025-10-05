@@ -5,12 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#0ea5e9">
     <title>1分瞑想</title>
-    <link rel="manifest" href="./manifest.json">
     <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="./icons/icon.svg">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="mobile-web-app-capable" content="yes">
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
@@ -19,6 +14,20 @@
     </header>
 
     <main class="app-main">
+      <section class="app-controls" aria-label="タイマー設定">
+        <div class="session-selector" role="radiogroup" aria-label="セッション時間">
+          <button class="session-option" type="button" role="radio" aria-checked="false" data-session-id="short">20秒</button>
+          <button class="session-option is-active" type="button" role="radio" aria-checked="true" data-session-id="standard">1分</button>
+          <button class="session-option" type="button" role="radio" aria-checked="false" data-session-id="long">2分</button>
+        </div>
+        <div class="audio-controls" aria-label="音声ガイド設定">
+          <button id="muteToggle" class="secondary-btn" type="button" aria-pressed="false" aria-label="音声ガイドをミュート">サウンド ON</button>
+          <button id="soundTestBtn" class="secondary-btn" type="button">音を試聴</button>
+        </div>
+      </section>
+
+      <div class="sr-only" id="phaseLiveRegion" aria-live="assertive"></div>
+
       <div class="timer-card">
         <div class="progress-ring" id="progressRing" aria-hidden="true"></div>
         <div class="timer-content">
@@ -27,11 +36,9 @@
           <button id="startButton" class="primary-btn" aria-label="タイマー開始">はじめる</button>
         </div>
       </div>
-      <p class="hint">4秒 吸う → 8秒 止める → 8秒 吐く × 3セット</p>
     </main>
 
     <footer class="app-footer">
-      <small>ホーム画面に追加するとオフライン対応します</small>
       <div class="footer-actions">
         <button id="copyUrlBtn" class="copy-btn" aria-label="公開URLをコピー">URLをコピー</button>
       </div>
@@ -40,4 +47,3 @@
     <script defer src="./app.js"></script>
   </body>
   </html>
-

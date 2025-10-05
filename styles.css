@@ -53,6 +53,60 @@ html {
   padding: 16px;
 }
 
+.app-controls {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 28px;
+  width: min(92vw, 440px);
+}
+
+.session-selector,
+.audio-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.session-option,
+.secondary-btn {
+  appearance: none;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+  font-size: 14px;
+  letter-spacing: 0.03em;
+  padding: 8px 14px;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+
+.secondary-btn { font-size: 13px; }
+
+.session-option:focus-visible,
+.secondary-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.session-option.is-active {
+  background: linear-gradient(135deg, var(--accent), #22d3ee);
+  color: #001018;
+  box-shadow: 0 6px 16px rgba(14,165,233,0.32);
+}
+
+.secondary-btn[aria-pressed="true"],
+#muteToggle[aria-pressed="true"],
+.session-option.is-active[aria-checked="true"] {
+  border-color: rgba(255,255,255,0.22);
+}
+
+.secondary-btn:active,
+.session-option:active {
+  transform: translateY(1px);
+}
+
 .timer-card {
   position: relative;
   width: min(88vw, 420px);
@@ -120,14 +174,18 @@ html {
   filter: saturate(0.7);
 }
 
-.hint {
-  color: var(--muted);
-  font-size: 14px;
-  margin: 16px 0 0;
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
 }
+
 
 @media (min-width: 480px) {
   .app-header h1 { font-size: 44px; }
 }
-
-
