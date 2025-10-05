@@ -109,7 +109,7 @@ html {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .session-option,
@@ -127,14 +127,10 @@ html {
 
 .session-option {
   font-size: 14px;
-  flex: 1 1 88px;
-  min-width: 88px;
 }
 
 .secondary-btn {
   font-size: 13px;
-  flex: 1 1 120px;
-  min-width: 120px;
   border-color: rgba(255,255,255,0.18);
 }
 
@@ -244,14 +240,6 @@ html {
 @media (max-width: 420px) {
   .footer-actions { margin-top: 16px; }
   .session-option, .secondary-btn { padding: 7px 12px; }
+  .session-selector { gap: 6px; }
 }
 
-@media (max-width: 360px) {
-  .session-option, .secondary-btn {
-    flex: 1 1 100%;
-    font-size: 12px;
-  }
-  .audio-controls {
-    width: 100%;
-  }
-}

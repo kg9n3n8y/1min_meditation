@@ -7,7 +7,6 @@
   const copyUrlBtn = document.getElementById('copyUrlBtn');
   const sessionButtons = Array.from(document.querySelectorAll('.session-option'));
   const muteToggle = document.getElementById('muteToggle');
-  const soundTestBtn = document.getElementById('soundTestBtn');
   const phaseLiveRegion = document.getElementById('phaseLiveRegion');
 
   const ONE_SECOND_MS = 1000;
@@ -191,27 +190,6 @@
     }
   }
 
-  function handleSoundTest() {
-    audioEngine.ensureContext().then((ctx) => {
-      if (!ctx) {
-        if (phaseLiveRegion) {
-          phaseLiveRegion.textContent = '音声ガイドを利用できません';
-        }
-        return;
-      }
-      if (audioEngine.isMuted()) {
-        if (phaseLiveRegion) {
-          phaseLiveRegion.textContent = 'ミュート中のため音は再生されません';
-        }
-        return;
-      }
-      audioEngine.playTestCue();
-      if (phaseLiveRegion) {
-        phaseLiveRegion.textContent = 'ガイド音を再生しました';
-      }
-    }).catch(() => {});
-  }
-
   function handleSessionKeydown(event) {
     const { key } = event;
     if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', ' ', 'Enter'].includes(key)) return;
@@ -266,13 +244,6 @@
     });
   }
 
-  if (soundTestBtn) {
-    soundTestBtn.addEventListener('click', (event) => {
-      event.preventDefault();
-      handleSoundTest();
-    });
-  }
-
   if (copyUrlBtn) {
     copyUrlBtn.addEventListener('click', async () => {
       const url = 'https://kg9n3n8y.github.io/1min_meditation/';
@@ -293,22 +264,23 @@
     }, { passive: true });
   }
 
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.getRegistrations()
-      .then((registrations) => {
-        registrations.forEach((registration) => {
-          registration.unregister().catch(() => {});
-        });
-      })
-      .catch(() => {});
-  }
 
-  if ('caches' in window) {
-    caches.keys().then((keys) => {
-      keys.forEach((key) => {
-        caches.delete(key).catch(() => {});
+  const warmupOnInteraction = () => {
+    audioEngine.ensureContext().catch(() => {});
+  };
+
+  ['pointerdown', 'touchstart'].forEach((eventName) => {
+    document.addEventListener(eventName, () => {
+      warmupOnInteraction();
+    }, { once: true, passive: true });
+  });
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch((error) => {
+        console.warn('ServiceWorker registration failed:', error);
       });
-    }).catch(() => {});
+    });
   }
 
   function createGuideAudio() {
@@ -534,8 +506,7 @@
 
     return {
       ensureContext,
-      playGuide,
-      playTestCue,
+      playGuide
       toggleMuted,
       setMuted,
       isMuted: muted,
