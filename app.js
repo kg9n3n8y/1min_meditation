@@ -32,6 +32,7 @@
   let phaseEndTs = 0;
   let timerRaf = 0;
   let totalStartTs = 0;
+  let pendingAudioRefresh = false;
 
   function buildPattern(sets) {
     return Array.from({ length: sets }, () => BASE_PATTERN).flat();
@@ -118,6 +119,10 @@
     updatePhaseLabel('タップで開始', false);
     countdownLabel.textContent = String(totalSeconds);
     updateProgress(0);
+    if (pendingAudioRefresh) {
+      audioEngine.refreshOutput().catch(() => {});
+      pendingAudioRefresh = false;
+    }
   }
 
   function finish() {
@@ -275,16 +280,58 @@
     }, { once: true, passive: true });
   });
 
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    const swUrl = './service-worker.js';
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register(swUrl).catch((error) => {
+        console.error('Service worker registration failed:', error);
+      });
+    });
+  }
+
+  registerServiceWorker();
 
   function createGuideAudio() {
     let audioCtx = null;
     let isMuted = false;
     let warmedUp = false;
+    let resumePending = false;
+
+    function instantiateAudioContext() {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      try {
+        return new Ctx({ latencyHint: 'interactive' });
+      } catch (_) {
+        try {
+          return new Ctx();
+        } catch (error) {
+          console.error('Failed to create AudioContext:', error);
+          return null;
+        }
+      }
+    }
+
+    function bindLifecycleHooks(ctx) {
+      if (!ctx || typeof ctx.addEventListener !== 'function') return;
+      ctx.addEventListener('statechange', () => {
+        if (ctx.state === 'interrupted') {
+          resumePending = true;
+        } else if (ctx.state === 'running') {
+          resumePending = false;
+        } else if (ctx.state === 'suspended' && !document.hidden) {
+          ctx.resume().catch(() => {});
+        }
+      });
+    }
 
     function getAudioCtx() {
       if (!audioCtx) {
-        const Ctx = window.AudioContext || window.webkitAudioContext;
-        if (Ctx) audioCtx = new Ctx();
+        audioCtx = instantiateAudioContext();
+        if (audioCtx) {
+          bindLifecycleHooks(audioCtx);
+        }
       }
       return audioCtx;
     }
@@ -306,10 +353,11 @@
     function ensureContext() {
       const ctx = getAudioCtx();
       if (!ctx) return Promise.resolve(null);
-      if (ctx.state === 'suspended') {
+      if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
         return ctx.resume().then(() => {
           warmup(ctx);
           warmedUp = true;
+          resumePending = false;
           return ctx;
         }).catch((error) => {
           console.error('Failed to resume AudioContext:', error);
@@ -320,11 +368,18 @@
         warmup(ctx);
         warmedUp = true;
       }
+      resumePending = false;
       return Promise.resolve(ctx);
     }
 
-    function playOrin(kind) {
-      const ctx = getAudioCtx();
+    function withContext(callback) {
+      return ensureContext().then((ctx) => {
+        if (!ctx || isMuted) return null;
+        return callback(ctx);
+      });
+    }
+
+    function playOrin(ctx, kind) {
       if (!ctx || isMuted) return;
 
       const now = ctx.currentTime;
@@ -427,8 +482,7 @@
       excite.stop(now + 0.05);
     }
 
-    function playClap() {
-      const ctx = getAudioCtx();
+    function playClap(ctx) {
       if (!ctx || isMuted) return;
 
       const now = ctx.currentTime;
@@ -471,11 +525,14 @@
     }
 
     function playGuide(kind) {
-      if (kind === 'end') {
-        playClap();
-        return;
-      }
-      playOrin(kind);
+      withContext((ctx) => {
+        if (kind === 'end') {
+          playClap(ctx);
+        } else {
+          playOrin(ctx, kind);
+        }
+        return null;
+      });
     }
 
     function toggleMuted() {
@@ -492,12 +549,71 @@
       return isMuted;
     }
 
+    function refreshOutput() {
+      const ctx = audioCtx;
+      if (!ctx) return ensureContext();
+      audioCtx = null;
+      warmedUp = false;
+      resumePending = false;
+      if (typeof ctx.close === 'function') {
+        return ctx.close().catch((error) => {
+          console.error('Failed to close AudioContext:', error);
+        }).finally(() => ensureContext());
+      }
+      return ensureContext();
+    }
+
+    function resumeIfNeeded() {
+      if (resumePending) {
+        return ensureContext();
+      }
+      if (audioCtx && audioCtx.state === 'suspended' && !document.hidden) {
+        return ensureContext();
+      }
+      return Promise.resolve(audioCtx || null);
+    }
+
     return {
       ensureContext,
       playGuide,
       toggleMuted,
       setMuted,
       isMuted: muted,
+      refreshOutput,
+      resumeIfNeeded,
     };
+  }
+
+  function scheduleAudioRefresh() {
+    if (isRunning) {
+      pendingAudioRefresh = true;
+      return;
+    }
+    audioEngine.refreshOutput().catch(() => {});
+    pendingAudioRefresh = false;
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      audioEngine.resumeIfNeeded().catch(() => {});
+    }
+  });
+
+  window.addEventListener('focus', () => {
+    audioEngine.resumeIfNeeded().catch(() => {});
+  });
+
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) {
+      scheduleAudioRefresh();
+    } else {
+      audioEngine.resumeIfNeeded().catch(() => {});
+    }
+  });
+
+  if (navigator.mediaDevices && typeof navigator.mediaDevices.addEventListener === 'function') {
+    navigator.mediaDevices.addEventListener('devicechange', () => {
+      scheduleAudioRefresh();
+    });
   }
 })();
