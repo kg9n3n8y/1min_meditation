@@ -7,18 +7,28 @@
   --accent-weak: #7dd3fc;
 }
 
-* { box-sizing: border-box; touch-action: manipulation; }
+* {
+  box-sizing: border-box;
+  touch-action: manipulation;
+}
+
 html, body {
   height: 100%;
   width: 100%;
 }
+
 body {
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Noto Sans JP, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
   color: var(--text);
   background: radial-gradient(1200px 800px at 70% -10%, #0b2a42, var(--bg));
+  min-height: 100vh;
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
+}
+
+@supports (-webkit-touch-callout: none) {
+  body { min-height: -webkit-fill-available; }
 }
 
 html {
@@ -30,13 +40,31 @@ html {
   text-align: center;
   padding: 8px 16px;
 }
+
+.app-header {
+  padding-top: 24px;
+  padding-top: calc(24px + env(safe-area-inset-top, 0px));
+}
+
+.app-footer {
+  padding-bottom: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
+
 .app-header h1 {
-  font-size: 40px;
-  margin: 30px 0 0;
+  font-size: clamp(32px, 8vw, 44px);
+  margin: 24px 0 0;
   font-weight: 700;
 }
-.app-footer small { color: var(--muted); }
-.footer-actions { margin-top: 20px; display: flex; justify-content: center; }
+
+
+.footer-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
 .copy-btn {
   appearance: none;
   border: 1px solid rgba(255,255,255,0.15);
@@ -44,20 +72,35 @@ html {
   color: var(--text);
   font-size: 12px;
   border-radius: 999px;
-  padding: 6px 10px;
+  padding: 6px 12px;
 }
 
 .app-main {
-  display: grid;
-  place-items: center;
-  padding: 16px;
+  flex: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(20px, 5vw, 36px);
+  padding: clamp(16px, 5vw, 40px);
+  padding-top: clamp(16px, 5vw, 40px);
+  padding-bottom: clamp(16px, 5vw, 40px);
+}
+
+.app-main {
+  padding-top: calc(clamp(16px, 5vw, 40px) + env(safe-area-inset-top, 0px));
+  padding-bottom: calc(clamp(16px, 5vw, 40px) + env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-height: 760px) {
+  .app-main { justify-content: flex-start; }
 }
 
 .app-controls {
+  width: clamp(260px, 90vw, 420px);
   display: grid;
   gap: 12px;
-  margin-bottom: 28px;
-  width: min(92vw, 440px);
 }
 
 .session-selector,
@@ -76,13 +119,24 @@ html {
   border: 1px solid rgba(255,255,255,0.15);
   background: rgba(255,255,255,0.06);
   color: var(--text);
-  font-size: 14px;
   letter-spacing: 0.03em;
   padding: 8px 14px;
   transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+  text-align: center;
 }
 
-.secondary-btn { font-size: 13px; }
+.session-option {
+  font-size: 14px;
+  flex: 1 1 88px;
+  min-width: 88px;
+}
+
+.secondary-btn {
+  font-size: 13px;
+  flex: 1 1 120px;
+  min-width: 120px;
+  border-color: rgba(255,255,255,0.18);
+}
 
 .session-option:focus-visible,
 .secondary-btn:focus-visible {
@@ -109,8 +163,8 @@ html {
 
 .timer-card {
   position: relative;
-  width: min(88vw, 420px);
-  aspect-ratio: 1/1;
+  width: clamp(260px, 72vw, 420px);
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
   background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
   border: 1px solid rgba(255,255,255,0.08);
@@ -139,12 +193,12 @@ html {
   grid-template-rows: auto 1fr auto;
   align-items: center;
   justify-items: center;
-  padding: 18px;
+  padding: clamp(16px, 5vw, 22px);
   gap: 8px;
 }
 
 .phase {
-  font-size: 24px;
+  font-size: clamp(20px, 6vw, 24px);
   color: var(--accent-weak);
   letter-spacing: 0.08em;
 }
@@ -160,7 +214,7 @@ html {
   appearance: none;
   border: none;
   border-radius: 999px;
-  padding: 14px 22px;
+  padding: clamp(12px, 3.8vw, 16px) clamp(20px, 6vw, 26px);
   background: linear-gradient(135deg, var(--accent), #22d3ee);
   color: #001018;
   font-weight: 700;
@@ -168,7 +222,9 @@ html {
   letter-spacing: 0.04em;
   box-shadow: 0 8px 20px rgba(14,165,233,0.35);
 }
+
 .primary-btn:active { transform: translateY(1px); }
+
 .primary-btn:disabled {
   opacity: 0.7;
   filter: saturate(0.7);
@@ -185,7 +241,17 @@ html {
   border: 0;
 }
 
+@media (max-width: 420px) {
+  .footer-actions { margin-top: 16px; }
+  .session-option, .secondary-btn { padding: 7px 12px; }
+}
 
-@media (min-width: 480px) {
-  .app-header h1 { font-size: 44px; }
+@media (max-width: 360px) {
+  .session-option, .secondary-btn {
+    flex: 1 1 100%;
+    font-size: 12px;
+  }
+  .audio-controls {
+    width: 100%;
+  }
 }
