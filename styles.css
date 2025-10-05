@@ -42,8 +42,8 @@ html {
 }
 
 .app-header {
-  padding-top: 24px;
-  padding-top: calc(24px + env(safe-area-inset-top, 0px));
+  padding-top: 16px;
+  padding-top: calc(16px + env(safe-area-inset-top, 0px));
 }
 
 .app-footer {
@@ -53,7 +53,7 @@ html {
 
 .app-header h1 {
   font-size: clamp(32px, 8vw, 44px);
-  margin: 24px 0 0;
+  margin: 16px 0 0;
   font-weight: 700;
 }
 

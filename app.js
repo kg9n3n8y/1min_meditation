@@ -485,11 +485,6 @@
       playOrin(kind);
     }
 
-    function playTestCue() {
-      if (isMuted) return;
-      playOrin('start');
-    }
-
     function toggleMuted() {
       isMuted = !isMuted;
       return isMuted;
@@ -506,7 +501,7 @@
 
     return {
       ensureContext,
-      playGuide
+      playGuide,
       toggleMuted,
       setMuted,
       isMuted: muted,
