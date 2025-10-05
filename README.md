@@ -17,11 +17,3 @@
 1. ページへアクセス: https://kg9n3n8y.github.io/1min_meditation/
 2. プリセットを選んで丸いタイマーをタップ
 3. 停止したい時はもう一度タップで初期化
-
-## 開発メモ
-```bash
-npm install
-npm run lint
-```
-
-ESLint でソースをチェックできます (Node.js が必要です)。
