@@ -23,6 +23,11 @@
   let timerRaf = 0;
   let totalStartTs = 0;
   let audioCtx = null;
+  let audioReadyPromise = null;
+  let audioPrimed = false;
+  let audioHandlersInstalled = false;
+  let audioResumeArmed = false;
+  const audioUnlockEvents = ['touchstart', 'touchend', 'pointerdown', 'pointerup', 'click', 'keydown'];
 
   function updateProgress(totalElapsedSec) {
     const progressDeg = Math.min(360, (totalElapsedSec / totalSeconds) * 360);
@@ -33,13 +38,124 @@
   function getAudioCtx() {
     if (!audioCtx) {
       const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (Ctx) audioCtx = new Ctx();
+      if (Ctx) {
+        audioCtx = new Ctx();
+        setupAudioContext(audioCtx);
+      }
     }
     return audioCtx;
   }
 
-  function playOrin(kind) {
+  function setupAudioContext(ctx) {
+    if (audioHandlersInstalled || !ctx) return;
+    audioHandlersInstalled = true;
+
+    ctx.addEventListener('statechange', () => {
+      if (ctx.state === 'interrupted' || ctx.state === 'suspended') {
+        armResumeOnGesture();
+      }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (!audioCtx) return;
+      if (document.visibilityState === 'visible' && (audioCtx.state === 'suspended' || audioCtx.state === 'interrupted')) {
+        void ensureAudioReady();
+      }
+    });
+  }
+
+  function armResumeOnGesture() {
+    if (audioResumeArmed) return;
+    audioResumeArmed = true;
+
+    const resumeOnce = () => {
+      audioResumeArmed = false;
+      audioUnlockEvents.forEach((eventName) => {
+        window.removeEventListener(eventName, resumeOnce, true);
+      });
+      void ensureAudioReady();
+    };
+
+    audioUnlockEvents.forEach((eventName) => {
+      window.addEventListener(eventName, resumeOnce, { once: true, capture: true });
+    });
+  }
+
+  function warmupAudio(ctx) {
+    if (!ctx || audioPrimed) return;
+    audioPrimed = true;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      gain.gain.value = 0.0005;
+      osc.connect(gain).connect(ctx.destination);
+      const now = ctx.currentTime;
+      osc.start(now);
+      osc.stop(now + 0.05);
+    } catch (err) {
+      console.warn('Audio warmup failed', err);
+    }
+  }
+
+  function waitForRunning(ctx) {
+    return new Promise((resolve) => {
+      if (!ctx) {
+        resolve();
+        return;
+      }
+      if (ctx.state === 'running') {
+        resolve();
+        return;
+      }
+
+      const timeout = setTimeout(resolve, 300);
+      const handle = () => {
+        if (ctx.state === 'running' || ctx.state === 'closed') {
+          clearTimeout(timeout);
+          ctx.removeEventListener('statechange', handle);
+          resolve();
+        }
+      };
+      ctx.addEventListener('statechange', handle);
+    });
+  }
+
+  async function ensureAudioReady() {
     const ctx = getAudioCtx();
+    if (!ctx) return null;
+
+    if (ctx.state === 'running' && audioPrimed) return ctx;
+
+    if (!audioReadyPromise) {
+      audioReadyPromise = (async () => {
+        if (ctx.state !== 'running') {
+          try {
+            await ctx.resume();
+          } catch (err) {
+            console.error('AudioContext resume failed', err);
+          }
+          await waitForRunning(ctx);
+        }
+
+        if (ctx.state !== 'running') {
+          armResumeOnGesture();
+          return;
+        }
+
+        warmupAudio(ctx);
+      })();
+
+      audioReadyPromise.finally(() => {
+        audioReadyPromise = null;
+      });
+    }
+
+    await audioReadyPromise;
+    return ctx.state === 'running' ? ctx : null;
+  }
+
+  function playOrin(kind, ctxParam) {
+    const ctx = ctxParam || getAudioCtx();
     if (!ctx) return;
 
     const now = ctx.currentTime;
@@ -150,8 +266,8 @@
     excite.stop(now + 0.05);
   }
 
-  function playClap() {
-    const ctx = getAudioCtx();
+  function playClap(ctxParam) {
+    const ctx = ctxParam || getAudioCtx();
     if (!ctx) return;
 
     const now = ctx.currentTime;
@@ -196,8 +312,26 @@
   }
 
   function playGuide(kind) {
-    if (kind === 'end') return playClap();
-    return playOrin(kind);
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+
+    if (ctx.state !== 'running') {
+      ensureAudioReady()
+        .then(() => {
+          const readyCtx = getAudioCtx();
+          if (readyCtx && readyCtx.state === 'running') {
+            if (kind === 'end') playClap(readyCtx);
+            else playOrin(kind, readyCtx);
+          }
+        })
+        .catch((err) => {
+          console.error('Failed to resume audio for guide tone', err);
+        });
+      return;
+    }
+
+    if (kind === 'end') return playClap(ctx);
+    return playOrin(kind, ctx);
   }
 
   function formatSec(sec) {
@@ -271,41 +405,34 @@
     }
   }
 
-  function onButtonClick() {
-    // ユーザー操作をトリガーにAudioContextを初期化・再開
-    const ctx = getAudioCtx();
-    if (ctx && ctx.state === 'suspended') {
-      ctx.resume().then(() => {
-        console.log('AudioContext resumed successfully');
-        // resume後、確実に音が出るようテストトーンを鳴らす(iOS/Bluetooth対策)
-        // 無音に近い短い音で初期化
-        const testOsc = ctx.createOscillator();
-        const testGain = ctx.createGain();
-        testGain.gain.value = 0.001;
-        testOsc.connect(testGain).connect(ctx.destination);
-        testOsc.start(ctx.currentTime);
-        testOsc.stop(ctx.currentTime + 0.01);
-      }).catch(e => {
-        console.error('Failed to resume AudioContext:', e);
-      });
-    }
-
+  async function onButtonClick() {
     if (isRunning) {
       reset();
-    } else {
-      start();
+      return;
     }
+
+    await ensureAudioReady();
+    start();
   }
 
-  startButton.addEventListener('click', (e) => { e.stopPropagation(); onButtonClick(); }, { passive: true });
-  timerCard.addEventListener('click', onButtonClick, { passive: true });
+  function handleTimerToggle() {
+    onButtonClick().catch((err) => {
+      console.error('Timer control failed', err);
+    });
+  }
+
+  startButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    handleTimerToggle();
+  }, { passive: true });
+  timerCard.addEventListener('click', handleTimerToggle, { passive: true });
   timerCard.tabIndex = 0;
   timerCard.setAttribute('role', 'button');
   timerCard.setAttribute('aria-label', 'タイマーの開始と停止');
   timerCard.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      onButtonClick();
+      handleTimerToggle();
     }
   });
 
