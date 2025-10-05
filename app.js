@@ -52,22 +52,39 @@
   function createAudioCtx() {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return null;
-    if (isIOS) {
+
+    const tryCreate = (opts) => {
       try {
-        return new Ctx({ sampleRate: 48000, latencyHint: "interactive" });
+        return opts ? new Ctx(opts) : new Ctx();
       } catch (_) {
-        try {
-          return new Ctx();
-        } catch {
-          return null;
-        }
+        return null;
       }
-    }
-    try {
-      return new Ctx();
-    } catch {
+    };
+
+    if (isIOS) {
+      // iOS + Bluetooth では 44.1kHz 等の経路が選ばれるので sampleRate を固定しない
+      const candidates = [
+        { latencyHint: "interactive" },
+        null,
+      ];
+      for (const opts of candidates) {
+        const ctx = tryCreate(opts);
+        if (!ctx) continue;
+        // 稀に 0Hz / 異常値を返す個体があるため無効値を排除
+        if (typeof ctx.sampleRate === "number" && ctx.sampleRate <= 0) {
+          try {
+            ctx.close();
+          } catch (_) {}
+          continue;
+        }
+        return ctx;
+      }
       return null;
     }
+
+    const ctx = tryCreate();
+    if (ctx) return ctx;
+    return tryCreate(null);
   }
 
   function getAudioCtx() {
