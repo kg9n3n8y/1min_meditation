@@ -142,7 +142,10 @@
   function start() {
     if (isRunning) return;
     isRunning = true;
-    const ctxPromise = audioUnlock.unlock();
+    
+    // iOS PWA対応: 同期的にAudioContextをresume
+    audioEngine.resumeSync();
+    
     startButton.textContent = '停止';
     startButton.setAttribute('aria-label', 'タイマー停止');
     currentIndex = 0;
@@ -154,9 +157,9 @@
     updateProgress(0);
     timerRaf = requestAnimationFrame(loop);
     tryVibrate(30);
-    ctxPromise.then((ctx) => {
-      if (ctx) audioEngine.playGuide('inhale');
-    }).catch(() => {});
+    
+    // 音声再生(同期的なresumeの後なので再生可能)
+    audioEngine.playGuide('inhale');
   }
 
   function reset() {
@@ -344,7 +347,6 @@
     let audioCtx = null;
     let isMuted = false;
     let warmedUp = false;
-    let resumePending = false;
 
     function instantiateAudioContext() {
       const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -364,12 +366,9 @@
     function bindLifecycleHooks(ctx) {
       if (!ctx || typeof ctx.addEventListener !== 'function') return;
       ctx.addEventListener('statechange', () => {
-        if (ctx.state === 'interrupted') {
-          resumePending = true;
-        } else if (ctx.state === 'running') {
-          resumePending = false;
-        } else if (ctx.state === 'suspended' && !document.hidden) {
-          ctx.resume().catch(() => {});
+        if (ctx.state === 'suspended' && !document.hidden) {
+          // iOS PWAではresumeを同期的に呼ぶ必要があるため、ここでは何もしない
+          // ユーザージェスチャー時に明示的にresumeSyncを呼ぶ
         }
       });
     }
@@ -385,6 +384,7 @@
     }
 
     function warmup(ctx) {
+      if (!ctx || warmedUp) return;
       try {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -393,42 +393,42 @@
         const now = ctx.currentTime;
         osc.start(now);
         osc.stop(now + 0.01);
+        warmedUp = true;
       } catch (error) {
         console.error('Failed to warm up AudioContext:', error);
       }
     }
 
-    function ensureContext() {
+    // iOS PWA対応: 同期的なresume関数
+    function resumeSync() {
       const ctx = getAudioCtx();
-      if (!ctx) return Promise.resolve(null);
+      if (!ctx) return;
+      
+      // suspendedまたはinterruptedの場合は同期的にresumeを開始
       if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
-        return ctx.resume().then(() => {
+        try {
+          ctx.resume();
           warmup(ctx);
-          warmedUp = true;
-          resumePending = false;
-          return ctx;
-        }).catch((error) => {
+        } catch (error) {
           console.error('Failed to resume AudioContext:', error);
-          return null;
-        });
-      }
-      if (!warmedUp) {
+        }
+      } else if (ctx.state === 'running') {
         warmup(ctx);
-        warmedUp = true;
       }
-      resumePending = false;
-      return Promise.resolve(ctx);
-    }
-
-    function withContext(callback) {
-      return ensureContext().then((ctx) => {
-        if (!ctx || isMuted) return null;
-        return callback(ctx);
-      });
     }
 
     function playOrin(ctx, kind) {
       if (!ctx || isMuted) return;
+      
+      // iOS PWA対応: 再生前に状態を確認し、必要に応じてresume
+      if (ctx.state !== 'running') {
+        try {
+          ctx.resume();
+        } catch (error) {
+          console.error('Failed to resume before playback:', error);
+          return;
+        }
+      }
 
       const now = ctx.currentTime;
       const master = ctx.createGain();
@@ -532,6 +532,16 @@
 
     function playClap(ctx) {
       if (!ctx || isMuted) return;
+      
+      // iOS PWA対応: 再生前に状態を確認
+      if (ctx.state !== 'running') {
+        try {
+          ctx.resume();
+        } catch (error) {
+          console.error('Failed to resume before playback:', error);
+          return;
+        }
+      }
 
       const now = ctx.currentTime;
       const master = ctx.createGain();
@@ -573,14 +583,14 @@
     }
 
     function playGuide(kind) {
-      withContext((ctx) => {
-        if (kind === 'end') {
-          playClap(ctx);
-        } else {
-          playOrin(ctx, kind);
-        }
-        return null;
-      });
+      const ctx = getAudioCtx();
+      if (!ctx) return;
+      
+      if (kind === 'end') {
+        playClap(ctx);
+      } else {
+        playOrin(ctx, kind);
+      }
     }
 
     function toggleMuted() {
@@ -599,30 +609,31 @@
 
     function refreshOutput() {
       const ctx = audioCtx;
-      if (!ctx) return ensureContext();
+      if (!ctx) return Promise.resolve(null);
       audioCtx = null;
       warmedUp = false;
-      resumePending = false;
       if (typeof ctx.close === 'function') {
         return ctx.close().catch((error) => {
           console.error('Failed to close AudioContext:', error);
-        }).finally(() => ensureContext());
+        }).finally(() => {
+          getAudioCtx();
+          return Promise.resolve(audioCtx);
+        });
       }
-      return ensureContext();
+      getAudioCtx();
+      return Promise.resolve(audioCtx);
     }
 
     function resumeIfNeeded() {
-      if (resumePending) {
-        return ensureContext();
+      const ctx = getAudioCtx();
+      if (ctx && ctx.state === 'suspended' && !document.hidden) {
+        resumeSync();
       }
-      if (audioCtx && audioCtx.state === 'suspended' && !document.hidden) {
-        return ensureContext();
-      }
-      return Promise.resolve(audioCtx || null);
+      return Promise.resolve(ctx || null);
     }
 
     return {
-      ensureContext,
+      resumeSync,
       playGuide,
       toggleMuted,
       setMuted,
@@ -634,7 +645,6 @@
 
   function setupAudioUnlockController(engine) {
     let unlocked = false;
-    let pendingUnlock = null;
     let listenersAttached = false;
 
     const gestureConfigs = [
@@ -672,23 +682,12 @@
     }
 
     function unlock() {
-      if (unlocked) {
-        return engine.ensureContext();
+      if (!unlocked) {
+        // iOS PWA対応: 同期的にresumeを実行
+        engine.resumeSync();
+        unlocked = true;
+        detachListeners();
       }
-      if (!pendingUnlock) {
-        pendingUnlock = engine.ensureContext().then((ctx) => {
-          if (ctx && ctx.state === 'running') {
-            unlocked = true;
-            detachListeners();
-          }
-          return ctx;
-        }).catch(() => null).finally(() => {
-          if (!unlocked) {
-            pendingUnlock = null;
-          }
-        });
-      }
-      return pendingUnlock;
     }
 
     function onGesture(event) {
@@ -703,7 +702,6 @@
       markLocked() {
         if (!unlocked) return;
         unlocked = false;
-        pendingUnlock = null;
         attachListeners();
       },
     };
