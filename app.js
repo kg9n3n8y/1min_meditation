@@ -6,28 +6,34 @@
   const timerCard = document.querySelector('.timer-card');
   const copyUrlBtn = document.getElementById('copyUrlBtn');
   const inhaleSlider = document.getElementById('inhaleSlider');
+  const holdSlider = document.getElementById('holdSlider');
   const cycleSlider = document.getElementById('cycleSlider');
   const inhaleSecondsValue = document.getElementById('inhaleSecondsValue');
+  const holdSecondsValue = document.getElementById('holdSecondsValue');
   const cycleCountValue = document.getElementById('cycleCountValue');
   const breathingGuideText = document.getElementById('breathingGuideText');
   const phaseLiveRegion = document.getElementById('phaseLiveRegion');
 
   const ONE_SECOND_MS = 1000;
   const BASE_PATTERN = [
-    { label: '吸う', key: 'inhale', multiplier: 1 },
-    { label: '止める', key: 'hold', multiplier: 2 },
-    { label: '吐く', key: 'exhale', multiplier: 2 },
+    { label: '吸う', key: 'inhale', calcDuration: (inhaleSec) => inhaleSec },
+    { label: '止める', key: 'hold', calcDuration: (_, holdSec) => holdSec },
+    { label: '吐く', key: 'exhale', calcDuration: (inhaleSec) => inhaleSec * 2 },
   ];
   const DEFAULT_INHALE_SECONDS = 4;
+  const DEFAULT_HOLD_SECONDS = 8;
   const DEFAULT_CYCLE_COUNT = 3;
-  const SLIDER_MIN = 1;
-  const SLIDER_MAX = 9;
+  const BREATH_MIN_SECONDS = 1;
+  const BREATH_MAX_SECONDS = 8;
+  const CYCLE_MIN_COUNT = 1;
+  const CYCLE_MAX_COUNT = 9;
 
   const audioEngine = createGuideAudio();
 
-  let inhaleSeconds = getSliderValue(inhaleSlider, DEFAULT_INHALE_SECONDS);
-  let cycleCount = getSliderValue(cycleSlider, DEFAULT_CYCLE_COUNT);
-  let pattern = buildPattern(inhaleSeconds, cycleCount);
+  let inhaleSeconds = getSliderValue(inhaleSlider, DEFAULT_INHALE_SECONDS, BREATH_MIN_SECONDS, BREATH_MAX_SECONDS);
+  let holdSeconds = getSliderValue(holdSlider, DEFAULT_HOLD_SECONDS, BREATH_MIN_SECONDS, BREATH_MAX_SECONDS);
+  let cycleCount = getSliderValue(cycleSlider, DEFAULT_CYCLE_COUNT, CYCLE_MIN_COUNT, CYCLE_MAX_COUNT);
+  let pattern = buildPattern(inhaleSeconds, holdSeconds, cycleCount);
   let totalSeconds = getTotalSeconds(pattern);
 
   let isRunning = false;
@@ -42,18 +48,18 @@
     return Math.min(max, Math.max(min, Math.round(value)));
   }
 
-  function getSliderValue(slider, fallback) {
+  function getSliderValue(slider, fallback, min = BREATH_MIN_SECONDS, max = BREATH_MAX_SECONDS) {
     if (!slider) return fallback;
     const raw = Number(slider.value);
-    return clampNumber(raw, SLIDER_MIN, SLIDER_MAX, fallback);
+    return clampNumber(raw, min, max, fallback);
   }
 
-  function buildPattern(inhaleSec, sets) {
+  function buildPattern(inhaleSec, holdSec, sets) {
     return Array.from({ length: sets }, () => (
-      BASE_PATTERN.map(({ label, key, multiplier }) => ({
+      BASE_PATTERN.map(({ label, key, calcDuration }) => ({
         label,
         key,
-        duration: inhaleSec * multiplier,
+        duration: calcDuration(inhaleSec, holdSec),
       }))
     )).flat();
   }
@@ -80,6 +86,11 @@
       inhaleSlider.setAttribute('aria-valuenow', String(inhaleSeconds));
       inhaleSlider.setAttribute('aria-valuetext', `${inhaleSeconds}秒`);
     }
+    if (holdSlider) {
+      holdSlider.value = String(holdSeconds);
+      holdSlider.setAttribute('aria-valuenow', String(holdSeconds));
+      holdSlider.setAttribute('aria-valuetext', `${holdSeconds}秒`);
+    }
     if (cycleSlider) {
       cycleSlider.value = String(cycleCount);
       cycleSlider.setAttribute('aria-valuenow', String(cycleCount));
@@ -88,20 +99,23 @@
     if (inhaleSecondsValue) {
       inhaleSecondsValue.textContent = String(inhaleSeconds);
     }
+    if (holdSecondsValue) {
+      holdSecondsValue.textContent = String(holdSeconds);
+    }
     if (cycleCountValue) {
       cycleCountValue.textContent = String(cycleCount);
     }
     if (breathingGuideText) {
-      const holdSec = inhaleSeconds * 2;
       const exhaleSec = inhaleSeconds * 2;
-      breathingGuideText.textContent = `吸う ${inhaleSeconds}秒 → 止める ${holdSec}秒 → 吐く ${exhaleSec}秒 × ${cycleCount}回`;
+      breathingGuideText.textContent = `吸う ${inhaleSeconds}秒 → 止める ${holdSeconds}秒 → 吐く ${exhaleSec}秒 × ${cycleCount}回`;
     }
   }
 
   function applyConfig() {
-    inhaleSeconds = getSliderValue(inhaleSlider, DEFAULT_INHALE_SECONDS);
-    cycleCount = getSliderValue(cycleSlider, DEFAULT_CYCLE_COUNT);
-    pattern = buildPattern(inhaleSeconds, cycleCount);
+    inhaleSeconds = getSliderValue(inhaleSlider, DEFAULT_INHALE_SECONDS, BREATH_MIN_SECONDS, BREATH_MAX_SECONDS);
+    holdSeconds = getSliderValue(holdSlider, DEFAULT_HOLD_SECONDS, BREATH_MIN_SECONDS, BREATH_MAX_SECONDS);
+    cycleCount = getSliderValue(cycleSlider, DEFAULT_CYCLE_COUNT, CYCLE_MIN_COUNT, CYCLE_MAX_COUNT);
+    pattern = buildPattern(inhaleSeconds, holdSeconds, cycleCount);
     totalSeconds = getTotalSeconds(pattern);
     reset();
     updateConfigDisplay();
@@ -109,7 +123,7 @@
 
   function announceConfig() {
     if (!phaseLiveRegion) return;
-    const holdSec = inhaleSeconds * 2;
+    const holdSec = holdSeconds;
     const exhaleSec = inhaleSeconds * 2;
     phaseLiveRegion.textContent = `吸う${inhaleSeconds}秒、止める${holdSec}秒、吐く${exhaleSec}秒、${cycleCount}回のサイクルを設定しました`;
   }
@@ -225,8 +239,21 @@
       applyConfig();
     });
     inhaleSlider.addEventListener('change', () => {
-      const next = getSliderValue(inhaleSlider, DEFAULT_INHALE_SECONDS);
+      const next = getSliderValue(inhaleSlider, DEFAULT_INHALE_SECONDS, BREATH_MIN_SECONDS, BREATH_MAX_SECONDS);
       if (next !== inhaleSeconds) {
+        applyConfig();
+      }
+      announceConfig();
+    });
+  }
+
+  if (holdSlider) {
+    holdSlider.addEventListener('input', () => {
+      applyConfig();
+    });
+    holdSlider.addEventListener('change', () => {
+      const next = getSliderValue(holdSlider, DEFAULT_HOLD_SECONDS, BREATH_MIN_SECONDS, BREATH_MAX_SECONDS);
+      if (next !== holdSeconds) {
         applyConfig();
       }
       announceConfig();
@@ -238,7 +265,7 @@
       applyConfig();
     });
     cycleSlider.addEventListener('change', () => {
-      const next = getSliderValue(cycleSlider, DEFAULT_CYCLE_COUNT);
+      const next = getSliderValue(cycleSlider, DEFAULT_CYCLE_COUNT, CYCLE_MIN_COUNT, CYCLE_MAX_COUNT);
       if (next !== cycleCount) {
         applyConfig();
       }
