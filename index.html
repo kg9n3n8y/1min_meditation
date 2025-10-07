@@ -22,13 +22,17 @@
 
     <main class="app-main">
       <section class="app-controls" aria-label="タイマー設定">
-        <div class="session-selector" role="radiogroup" aria-label="セッション時間">
-          <button class="session-option" type="button" role="radio" aria-checked="false" data-session-id="short">20秒</button>
-          <button class="session-option is-active" type="button" role="radio" aria-checked="true" data-session-id="standard">1分</button>
-          <button class="session-option" type="button" role="radio" aria-checked="false" data-session-id="long">2分</button>
+        <div class="slider-group">
+          <label for="inhaleSlider" class="slider-label">
+            吸う秒数: <span id="inhaleSecondsValue">4</span>秒
+          </label>
+          <input id="inhaleSlider" class="slider" type="range" min="1" max="9" step="1" value="4" aria-valuemin="1" aria-valuemax="9" aria-valuenow="4" aria-valuetext="4秒">
         </div>
-        <div class="audio-controls" aria-label="音声ガイド設定">
-          <button id="muteToggle" class="secondary-btn" type="button" aria-pressed="false" aria-label="音声ガイドをミュート">サウンド ON</button>
+        <div class="slider-group">
+          <label for="cycleSlider" class="slider-label">
+            サイクル回数: <span id="cycleCountValue">3</span>回
+          </label>
+          <input id="cycleSlider" class="slider" type="range" min="1" max="9" step="1" value="3" aria-valuemin="1" aria-valuemax="9" aria-valuenow="3" aria-valuetext="3回">
         </div>
       </section>
 
@@ -43,7 +47,7 @@
         </div>
       </div>
       <div class="breathing-guide">
-        <small>吸う 4秒 → 止める 8秒 → 吐く 8秒</small>
+        <small id="breathingGuideText">吸う 4秒 → 止める 8秒 → 吐く 8秒 × 3回</small>
       </div>
     </main>
 

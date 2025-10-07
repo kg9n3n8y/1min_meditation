@@ -5,26 +5,29 @@
   const progressRing = document.getElementById('progressRing');
   const timerCard = document.querySelector('.timer-card');
   const copyUrlBtn = document.getElementById('copyUrlBtn');
-  const sessionButtons = Array.from(document.querySelectorAll('.session-option'));
-  const muteToggle = document.getElementById('muteToggle');
+  const inhaleSlider = document.getElementById('inhaleSlider');
+  const cycleSlider = document.getElementById('cycleSlider');
+  const inhaleSecondsValue = document.getElementById('inhaleSecondsValue');
+  const cycleCountValue = document.getElementById('cycleCountValue');
+  const breathingGuideText = document.getElementById('breathingGuideText');
   const phaseLiveRegion = document.getElementById('phaseLiveRegion');
 
   const ONE_SECOND_MS = 1000;
   const BASE_PATTERN = [
-    { label: '吸う', duration: 4, key: 'inhale' },
-    { label: '止める', duration: 8, key: 'hold' },
-    { label: '吐く', duration: 8, key: 'exhale' },
+    { label: '吸う', key: 'inhale', multiplier: 1 },
+    { label: '止める', key: 'hold', multiplier: 2 },
+    { label: '吐く', key: 'exhale', multiplier: 2 },
   ];
-  const SESSION_PRESETS = [
-    { id: 'short', label: '20秒', sets: 1 },
-    { id: 'standard', label: '1分', sets: 3 },
-    { id: 'long', label: '2分', sets: 6 },
-  ];
+  const DEFAULT_INHALE_SECONDS = 4;
+  const DEFAULT_CYCLE_COUNT = 3;
+  const SLIDER_MIN = 1;
+  const SLIDER_MAX = 9;
 
   const audioEngine = createGuideAudio();
 
-  let session = SESSION_PRESETS[1];
-  let pattern = buildPattern(session.sets);
+  let inhaleSeconds = getSliderValue(inhaleSlider, DEFAULT_INHALE_SECONDS);
+  let cycleCount = getSliderValue(cycleSlider, DEFAULT_CYCLE_COUNT);
+  let pattern = buildPattern(inhaleSeconds, cycleCount);
   let totalSeconds = getTotalSeconds(pattern);
 
   let isRunning = false;
@@ -34,8 +37,25 @@
   let totalStartTs = 0;
   let pendingAudioRefresh = false;
 
-  function buildPattern(sets) {
-    return Array.from({ length: sets }, () => BASE_PATTERN).flat();
+  function clampNumber(value, min, max, fallback) {
+    if (!Number.isFinite(value)) return fallback;
+    return Math.min(max, Math.max(min, Math.round(value)));
+  }
+
+  function getSliderValue(slider, fallback) {
+    if (!slider) return fallback;
+    const raw = Number(slider.value);
+    return clampNumber(raw, SLIDER_MIN, SLIDER_MAX, fallback);
+  }
+
+  function buildPattern(inhaleSec, sets) {
+    return Array.from({ length: sets }, () => (
+      BASE_PATTERN.map(({ label, key, multiplier }) => ({
+        label,
+        key,
+        duration: inhaleSec * multiplier,
+      }))
+    )).flat();
   }
 
   function getTotalSeconds(phases) {
@@ -54,37 +74,44 @@
     }
   }
 
-  function setSession(sessionId) {
-    const next = SESSION_PRESETS.find((preset) => preset.id === sessionId);
-    if (!next || next.id === session.id) return;
-
-    const wasRunning = isRunning;
-    if (wasRunning) reset();
-
-    session = next;
-    pattern = buildPattern(session.sets);
-    totalSeconds = getTotalSeconds(pattern);
-
-    countdownLabel.textContent = String(totalSeconds);
-    updateProgress(0);
-    updatePhaseLabel('タップで開始', false);
-    startButton.textContent = 'はじめる';
-    startButton.setAttribute('aria-label', 'タイマー開始');
-
-    if (phaseLiveRegion) {
-      phaseLiveRegion.textContent = `${session.label}セッションを選択しました`;
+  function updateConfigDisplay() {
+    if (inhaleSlider) {
+      inhaleSlider.value = String(inhaleSeconds);
+      inhaleSlider.setAttribute('aria-valuenow', String(inhaleSeconds));
+      inhaleSlider.setAttribute('aria-valuetext', `${inhaleSeconds}秒`);
     }
-
-    updateSessionButtons();
+    if (cycleSlider) {
+      cycleSlider.value = String(cycleCount);
+      cycleSlider.setAttribute('aria-valuenow', String(cycleCount));
+      cycleSlider.setAttribute('aria-valuetext', `${cycleCount}回`);
+    }
+    if (inhaleSecondsValue) {
+      inhaleSecondsValue.textContent = String(inhaleSeconds);
+    }
+    if (cycleCountValue) {
+      cycleCountValue.textContent = String(cycleCount);
+    }
+    if (breathingGuideText) {
+      const holdSec = inhaleSeconds * 2;
+      const exhaleSec = inhaleSeconds * 2;
+      breathingGuideText.textContent = `吸う ${inhaleSeconds}秒 → 止める ${holdSec}秒 → 吐く ${exhaleSec}秒 × ${cycleCount}回`;
+    }
   }
 
-  function updateSessionButtons() {
-    sessionButtons.forEach((btn) => {
-      const isActive = btn.dataset.sessionId === session.id;
-      btn.classList.toggle('is-active', isActive);
-      btn.setAttribute('aria-checked', String(isActive));
-      btn.tabIndex = isActive ? 0 : -1;
-    });
+  function applyConfig() {
+    inhaleSeconds = getSliderValue(inhaleSlider, DEFAULT_INHALE_SECONDS);
+    cycleCount = getSliderValue(cycleSlider, DEFAULT_CYCLE_COUNT);
+    pattern = buildPattern(inhaleSeconds, cycleCount);
+    totalSeconds = getTotalSeconds(pattern);
+    reset();
+    updateConfigDisplay();
+  }
+
+  function announceConfig() {
+    if (!phaseLiveRegion) return;
+    const holdSec = inhaleSeconds * 2;
+    const exhaleSec = inhaleSeconds * 2;
+    phaseLiveRegion.textContent = `吸う${inhaleSeconds}秒、止める${holdSec}秒、吐く${exhaleSec}秒、${cycleCount}回のサイクルを設定しました`;
   }
 
   function start() {
@@ -133,7 +160,7 @@
     timerRaf = 0;
     updatePhaseLabel('おつかれさま');
     setTimeout(() => {
-      alert(`おつかれさま!${session.label}の瞑想が終わったよ。`);
+      alert('おつかれさま! 瞑想が終わったよ。');
       reset();
     }, 500);
   }
@@ -179,51 +206,7 @@
     }
   }
 
-  function updateMuteButton() {
-    const muted = audioEngine.isMuted();
-    if (!muteToggle) return;
-    muteToggle.setAttribute('aria-pressed', String(muted));
-    muteToggle.textContent = muted ? 'サウンド OFF' : 'サウンド ON';
-    muteToggle.setAttribute('aria-label', muted ? '音声ガイドのミュートを解除' : '音声ガイドをミュート');
-  }
-
-  function handleMuteToggle() {
-    const muted = audioEngine.toggleMuted();
-    updateMuteButton();
-    if (phaseLiveRegion) {
-      phaseLiveRegion.textContent = muted ? 'ガイド音をミュートしました' : 'ガイド音をオンにしました';
-    }
-  }
-
-  function handleSessionKeydown(event) {
-    const { key } = event;
-    if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', ' ', 'Enter'].includes(key)) return;
-    event.preventDefault();
-    const currentBtn = event.currentTarget;
-    const index = sessionButtons.indexOf(currentBtn);
-    if (index === -1) return;
-
-    if (key === ' ' || key === 'Enter') {
-      setSession(currentBtn.dataset.sessionId);
-      return;
-    }
-
-    const isNext = key === 'ArrowRight' || key === 'ArrowDown';
-    const delta = isNext ? 1 : -1;
-    const nextIndex = (index + delta + sessionButtons.length) % sessionButtons.length;
-    const nextBtn = sessionButtons[nextIndex];
-    nextBtn.focus();
-    setSession(nextBtn.dataset.sessionId);
-  }
-
-  function handleSessionSelect(event) {
-    const btn = event.currentTarget;
-    setSession(btn.dataset.sessionId);
-  }
-
-  updateSessionButtons();
-  updateMuteButton();
-  countdownLabel.textContent = String(totalSeconds);
+  applyConfig();
 
   startButton.addEventListener('click', (e) => { e.stopPropagation(); onButtonClick(); }, { passive: true });
   timerCard.addEventListener('click', onButtonClick, { passive: true });
@@ -237,15 +220,29 @@
     }
   });
 
-  sessionButtons.forEach((btn) => {
-    btn.addEventListener('click', handleSessionSelect, { passive: true });
-    btn.addEventListener('keydown', handleSessionKeydown);
-  });
+  if (inhaleSlider) {
+    inhaleSlider.addEventListener('input', () => {
+      applyConfig();
+    });
+    inhaleSlider.addEventListener('change', () => {
+      const next = getSliderValue(inhaleSlider, DEFAULT_INHALE_SECONDS);
+      if (next !== inhaleSeconds) {
+        applyConfig();
+      }
+      announceConfig();
+    });
+  }
 
-  if (muteToggle) {
-    muteToggle.addEventListener('click', (event) => {
-      event.preventDefault();
-      handleMuteToggle();
+  if (cycleSlider) {
+    cycleSlider.addEventListener('input', () => {
+      applyConfig();
+    });
+    cycleSlider.addEventListener('change', () => {
+      const next = getSliderValue(cycleSlider, DEFAULT_CYCLE_COUNT);
+      if (next !== cycleCount) {
+        applyConfig();
+      }
+      announceConfig();
     });
   }
 
