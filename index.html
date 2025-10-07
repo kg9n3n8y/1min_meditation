@@ -29,9 +29,6 @@
           <button id="startButton" class="primary-btn" aria-label="タイマー開始">はじめる</button>
         </div>
       </div>
-      <div class="breathing-guide">
-        <small id="breathingGuideText">吸う 4秒 → 止める 8秒 → 吐く 8秒 × 3回</small>
-      </div>
 
       <section class="app-controls" aria-label="タイマー設定">
         <div class="slider-group">
@@ -42,15 +39,21 @@
         </div>
         <div class="slider-group">
           <label for="holdSlider" class="slider-label">
-            止める秒数: <span id="holdSecondsValue">8</span>秒
+            止める秒数: <span id="holdSecondsValue">4</span>秒
           </label>
-          <input id="holdSlider" class="slider" type="range" min="1" max="8" step="1" value="8" aria-valuemin="1" aria-valuemax="8" aria-valuenow="8" aria-valuetext="8秒">
+          <input id="holdSlider" class="slider" type="range" min="0" max="10" step="1" value="4" aria-valuemin="0" aria-valuemax="8" aria-valuenow="8" aria-valuetext="8秒">
+        </div>
+        <div class="slider-group">
+          <label for="exhaleSlider" class="slider-label">
+            吐く秒数: <span id="exhaleSecondsValue">8</span>秒
+          </label>
+          <input id="exhaleSlider" class="slider" type="range" min="2" max="16" step="1" value="8" aria-valuemin="2" aria-valuemax="16" aria-valuenow="8" aria-valuetext="8秒">
         </div>
         <div class="slider-group">
           <label for="cycleSlider" class="slider-label">
-            サイクル回数: <span id="cycleCountValue">3</span>回
+            サイクル回数: <span id="cycleCountValue">4</span>回
           </label>
-          <input id="cycleSlider" class="slider" type="range" min="1" max="9" step="1" value="3" aria-valuemin="1" aria-valuemax="9" aria-valuenow="3" aria-valuetext="3回">
+          <input id="cycleSlider" class="slider" type="range" min="1" max="9" step="1" value="4" aria-valuemin="1" aria-valuemax="9" aria-valuenow="3" aria-valuetext="3回">
         </div>
       </section>
 

@@ -86,16 +86,9 @@ html {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: clamp(12px, 4vh, 12px);
+  gap: clamp(10px, 3vh, 12px);
   padding-inline: clamp(16px, 5vw, 40px);
   padding-block: clamp(12px, 4vh, 24px);
-}
-
-.breathing-guide {
-  font-size: clamp(14px, 4vw, 18px);
-  color: var(--muted);
-  margin-top: clamp(12px, 3vh, 24px);
-  text-align: center;
 }
 
 .app-main {
@@ -116,23 +109,25 @@ html {
 }
 
 .app-controls {
-  width: clamp(260px, 90vw, 420px);
+  width: min(100%, 520px);
   display: grid;
-  gap: 12px;
+  gap: clamp(10px, 2.5vw, 14px);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .slider-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px 16px;
-  border-radius: 16px;
+  gap: 4px;
+  padding: 10px 14px;
+  border-radius: 14px;
   border: 1px solid rgba(255,255,255,0.08);
   background: rgba(255,255,255,0.04);
+  min-width: 0;
 }
 
 .slider-label {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text);
   letter-spacing: 0.03em;
   display: flex;
@@ -143,8 +138,8 @@ html {
 .slider {
   appearance: none;
   width: 100%;
-  height: 22px;
-  padding-block: 8px;
+  height: 20px;
+  padding-block: 6px;
   border-radius: 999px;
   background: transparent;
   outline: none;
@@ -152,7 +147,7 @@ html {
 }
 
 .slider::-webkit-slider-runnable-track {
-  height: 6px;
+  height: 5px;
   border-radius: 999px;
   background: rgba(255,255,255,0.18);
 }
@@ -164,15 +159,15 @@ html {
 
 .slider::-webkit-slider-thumb {
   appearance: none;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--accent), #22d3ee);
   box-shadow: 0 6px 16px rgba(14,165,233,0.35);
   border: none;
   cursor: pointer;
   transition: transform 0.12s ease;
-  margin-top: -8px;
+  margin-top: -7px;
 }
 
 .slider::-webkit-slider-thumb:active {
@@ -180,8 +175,8 @@ html {
 }
 
 .slider::-moz-range-thumb {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--accent), #22d3ee);
   box-shadow: 0 6px 16px rgba(14,165,233,0.35);
@@ -196,7 +191,7 @@ html {
 
 .slider::-moz-range-track {
   background: rgba(255,255,255,0.18);
-  height: 6px;
+  height: 5px;
   border-radius: 999px;
 }
 
@@ -282,5 +277,11 @@ html {
 
 @media (max-width: 420px) {
   .footer-actions { margin-top: 0px; }
-  .slider-group { padding: 10px 12px; }
+  .app-controls {
+    gap: 10px;
+    grid-template-columns: 1fr;
+  }
+  .slider-group {
+    padding: 10px 12px;
+  }
 }
