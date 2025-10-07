@@ -35,6 +35,7 @@
   const CYCLE_MAX_COUNT = 9;
 
   const audioEngine = createGuideAudio();
+  const audioUnlock = setupAudioUnlockController(audioEngine);
 
   let inhaleSeconds = getSliderValue(inhaleSlider, DEFAULT_INHALE_SECONDS, INHALE_MIN_SECONDS, INHALE_MAX_SECONDS);
   let holdSeconds = getSliderValue(holdSlider, DEFAULT_HOLD_SECONDS, HOLD_MIN_SECONDS, HOLD_MAX_SECONDS);
@@ -141,7 +142,7 @@
   function start() {
     if (isRunning) return;
     isRunning = true;
-    const ctxPromise = audioEngine.ensureContext();
+    const ctxPromise = audioUnlock.unlock();
     startButton.textContent = '停止';
     startButton.setAttribute('aria-label', 'タイマー停止');
     currentIndex = 0;
@@ -171,7 +172,9 @@
     countdownLabel.textContent = String(totalSeconds);
     updateProgress(0);
     if (pendingAudioRefresh) {
-      audioEngine.refreshOutput().catch(() => {});
+      audioEngine.refreshOutput().catch(() => {}).finally(() => {
+        audioUnlock.markLocked();
+      });
       pendingAudioRefresh = false;
     }
   }
@@ -232,14 +235,22 @@
 
   applyConfig();
 
-  startButton.addEventListener('click', (e) => { e.stopPropagation(); onButtonClick(); }, { passive: true });
-  timerCard.addEventListener('click', onButtonClick, { passive: true });
+  startButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    audioUnlock.unlock();
+    onButtonClick();
+  }, { passive: true });
+  timerCard.addEventListener('click', () => {
+    audioUnlock.unlock();
+    onButtonClick();
+  }, { passive: true });
   timerCard.tabIndex = 0;
   timerCard.setAttribute('role', 'button');
   timerCard.setAttribute('aria-label', 'タイマーの開始と停止');
   timerCard.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
+      audioUnlock.unlock();
       onButtonClick();
     }
   });
@@ -316,16 +327,6 @@
     }, { passive: true });
   }
 
-
-  const warmupOnInteraction = () => {
-    audioEngine.ensureContext().catch(() => {});
-  };
-
-  ['pointerdown', 'touchstart'].forEach((eventName) => {
-    document.addEventListener(eventName, () => {
-      warmupOnInteraction();
-    }, { once: true, passive: true });
-  });
 
   function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
@@ -631,12 +632,91 @@
     };
   }
 
+  function setupAudioUnlockController(engine) {
+    let unlocked = false;
+    let pendingUnlock = null;
+    let listenersAttached = false;
+
+    const gestureConfigs = [
+      { target: document, type: 'pointerdown', options: { passive: true, capture: true } },
+      { target: document, type: 'pointerup', options: { passive: true, capture: true } },
+      { target: document, type: 'touchstart', options: { passive: true, capture: true } },
+      { target: document, type: 'touchend', options: { passive: true, capture: true } },
+      { target: document, type: 'mousedown', options: { passive: true, capture: true } },
+      { target: document, type: 'mouseup', options: { passive: true, capture: true } },
+      { target: document, type: 'click', options: { passive: true, capture: true } },
+      { target: document, type: 'keydown', options: { capture: true } },
+    ];
+
+    function shouldHandle(event) {
+      if (event.type !== 'keydown') return true;
+      if (event.repeat) return false;
+      const key = event.key;
+      return key === 'Enter' || key === ' ' || key === 'Spacebar';
+    }
+
+    function attachListeners() {
+      if (listenersAttached) return;
+      gestureConfigs.forEach(({ target, type, options }) => {
+        target.addEventListener(type, onGesture, options);
+      });
+      listenersAttached = true;
+    }
+
+    function detachListeners() {
+      if (!listenersAttached) return;
+      gestureConfigs.forEach(({ target, type, options }) => {
+        target.removeEventListener(type, onGesture, options);
+      });
+      listenersAttached = false;
+    }
+
+    function unlock() {
+      if (unlocked) {
+        return engine.ensureContext();
+      }
+      if (!pendingUnlock) {
+        pendingUnlock = engine.ensureContext().then((ctx) => {
+          if (ctx && ctx.state === 'running') {
+            unlocked = true;
+            detachListeners();
+          }
+          return ctx;
+        }).catch(() => null).finally(() => {
+          if (!unlocked) {
+            pendingUnlock = null;
+          }
+        });
+      }
+      return pendingUnlock;
+    }
+
+    function onGesture(event) {
+      if (!shouldHandle(event)) return;
+      unlock();
+    }
+
+    attachListeners();
+
+    return {
+      unlock,
+      markLocked() {
+        if (!unlocked) return;
+        unlocked = false;
+        pendingUnlock = null;
+        attachListeners();
+      },
+    };
+  }
+
   function scheduleAudioRefresh() {
     if (isRunning) {
       pendingAudioRefresh = true;
       return;
     }
-    audioEngine.refreshOutput().catch(() => {});
+    audioEngine.refreshOutput().catch(() => {}).finally(() => {
+      audioUnlock.markLocked();
+    });
     pendingAudioRefresh = false;
   }
 
