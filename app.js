@@ -102,6 +102,11 @@
 
   const audioEngine = createGuideAudio();
   const audioUnlock = setupAudioUnlockController(audioEngine);
+  audioEngine.ensureContext().then(() => {
+    setTimeout(() => {
+      audioEngine.poke().catch(() => {});
+    }, 0);
+  }).catch(() => {});
 
   let inhaleSeconds = getSliderValue(inhaleSlider, DEFAULT_INHALE_SECONDS, INHALE_MIN_SECONDS, INHALE_MAX_SECONDS);
   let holdSeconds = getSliderValue(holdSlider, DEFAULT_HOLD_SECONDS, HOLD_MIN_SECONDS, HOLD_MAX_SECONDS);
@@ -116,6 +121,7 @@
   let timerRaf = 0;
   let totalStartTs = 0;
   let pendingAudioRefresh = false;
+  let refreshInFlight = null;
 
   function clampNumber(value, min, max, fallback) {
     if (!Number.isFinite(value)) return fallback;
@@ -211,6 +217,7 @@
 
   function start() {
     if (isRunning) return;
+    flushAudioRefresh({ force: true });
     isRunning = true;
     // ここでは unlock の Promise を待たず、可能なら同期的に初回ガイド音を鳴らす
     // （pointerdown で resume 済みであれば iOS でも通る）
@@ -260,12 +267,7 @@
     updatePhaseLabel('タップで開始', false);
     countdownLabel.textContent = String(totalSeconds);
     updateProgress(0);
-    if (pendingAudioRefresh) {
-      audioEngine.refreshOutput().catch(() => {}).finally(() => {
-        audioUnlock.markLocked();
-      });
-      pendingAudioRefresh = false;
-    }
+    flushAudioRefresh({ force: true });
   }
 
   function finish() {
@@ -718,15 +720,36 @@
     };
   }
 
-  function scheduleAudioRefresh() {
-    if (isRunning) {
-      pendingAudioRefresh = true;
-      return;
+  function flushAudioRefresh(options = {}) {
+    const { force = false } = options;
+    if (!force) {
+      if (!pendingAudioRefresh) return false;
+      if (isRunning) return false;
+      if (document.visibilityState && document.visibilityState === 'hidden') {
+        return false;
+      }
+    } else if (!pendingAudioRefresh && !refreshInFlight) {
+      return false;
     }
-    audioEngine.refreshOutput().catch(() => {}).finally(() => {
-      audioUnlock.markLocked();
-    });
+    if (refreshInFlight) {
+      pendingAudioRefresh = false;
+      return false;
+    }
     pendingAudioRefresh = false;
+    const refreshPromise = audioEngine.refreshOutput().catch(() => null);
+    refreshInFlight = refreshPromise.finally(() => {
+      audioUnlock.markLocked();
+      refreshInFlight = null;
+      if (pendingAudioRefresh) {
+        flushAudioRefresh();
+      }
+    });
+    return true;
+  }
+
+  function scheduleAudioRefresh() {
+    pendingAudioRefresh = true;
+    flushAudioRefresh();
   }
 
   document.addEventListener('visibilitychange', () => {
@@ -736,10 +759,12 @@
       return;
     }
     audioEngine.resumeIfNeeded().catch(() => {});
+    flushAudioRefresh();
   });
 
   window.addEventListener('focus', () => {
     audioEngine.resumeIfNeeded().catch(() => {});
+    flushAudioRefresh();
   });
 
   window.addEventListener('pageshow', (event) => {
@@ -748,6 +773,7 @@
     } else {
       audioEngine.resumeIfNeeded().catch(() => {});
     }
+    flushAudioRefresh();
   });
 
   window.addEventListener('pagehide', () => {

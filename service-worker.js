@@ -6,8 +6,6 @@ const ASSETS = [
   './app.js',
   './manifest.webmanifest',
   './icons/icon.svg',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
   './audio/inhale.mp3',
   './audio/hold.mp3',
   './audio/exhale.mp3',
