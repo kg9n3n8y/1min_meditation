@@ -1,4 +1,4 @@
-const CACHE_NAME = 'one-minute-meditation-v1';
+const CACHE_NAME = 'one-minute-meditation-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -7,7 +7,11 @@ const ASSETS = [
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-192.png',
-  './icons/icon-512.png'
+  './icons/icon-512.png',
+  './audio/inhale.mp3',
+  './audio/hold.mp3',
+  './audio/exhale.mp3',
+  './audio/end.mp3'
 ];
 
 self.addEventListener('install', (event) => {

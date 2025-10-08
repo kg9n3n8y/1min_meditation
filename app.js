@@ -25,11 +25,11 @@
   const DEFAULT_HOLD_SECONDS = 8;
   const DEFAULT_EXHALE_SECONDS = 8;
   const DEFAULT_CYCLE_COUNT = 3;
-  const INHALE_MIN_SECONDS = 1;
+  const INHALE_MIN_SECONDS = 2;
   const INHALE_MAX_SECONDS = 8;
   const HOLD_MIN_SECONDS = 0;
   const HOLD_MAX_SECONDS = 8;
-  const EXHALE_MIN_SECONDS = 2;
+  const EXHALE_MIN_SECONDS = 4;
   const EXHALE_MAX_SECONDS = 16;
   const CYCLE_MIN_COUNT = 1;
   const CYCLE_MAX_COUNT = 9;
@@ -157,16 +157,24 @@
     timerRaf = requestAnimationFrame(loop);
     tryVibrate(30);
 
-    // 同期経路: すでに AudioContext が running なら即鳴らす
-    if (audioEngine.isRunningSync && audioEngine.isRunningSync()) {
-      audioEngine.playGuide('inhale');
-    } else {
-      // 非同期経路（保険）: unlock 完了後に初回だけ鳴らす
+    const initialGuide = audioEngine.playGuide('inhale');
+    const ensureInitialGuide = () => {
       audioUnlock.unlock().then((ctx) => {
         if (ctx && isRunning && currentIndex === 0) {
           audioEngine.playGuide('inhale');
         }
       }).catch(() => {});
+    };
+    if (initialGuide && typeof initialGuide.then === 'function') {
+      initialGuide.then((played) => {
+        if (!played) {
+          ensureInitialGuide();
+        }
+      }).catch(() => {
+        ensureInitialGuide();
+      });
+    } else {
+      ensureInitialGuide();
     }
   }
 
@@ -224,7 +232,10 @@
       const nextPhase = pattern[currentIndex];
       updatePhaseLabel(nextPhase.label);
       phaseEndTs = now + nextPhase.duration * ONE_SECOND_MS;
-      audioEngine.playGuide(nextPhase.key);
+      const shouldPlayGuide = !(nextPhase.key === 'hold' && nextPhase.duration === 0);
+      if (shouldPlayGuide) {
+        audioEngine.playGuide(nextPhase.key);
+      }
     }
 
     timerRaf = requestAnimationFrame(loop);
@@ -356,268 +367,124 @@
   registerServiceWorker();
 
   function createGuideAudio() {
-    let audioCtx = null;
+    const AUDIO_FILES = {
+      inhale: 'audio/inhale.mp3',
+      hold: 'audio/hold.mp3',
+      exhale: 'audio/exhale.mp3',
+      end: 'audio/end.mp3',
+    };
+
+    const audioElements = {};
     let isMuted = false;
-    let warmedUp = false;
-    let resumePending = false;
+    let unlocked = false;
 
-    function instantiateAudioContext() {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return null;
-      try {
-        return new Ctx({ latencyHint: 'interactive' });
-      } catch (_) {
-        try {
-          return new Ctx();
-        } catch (error) {
-          console.error('Failed to create AudioContext:', error);
-          return null;
-        }
+    const FAKE_CONTEXT = {
+      state: 'running',
+      resume: () => Promise.resolve(FAKE_CONTEXT),
+    };
+
+    function ensureElement(kind) {
+      const url = AUDIO_FILES[kind];
+      if (!url) return null;
+      if (!audioElements[kind]) {
+        const element = new Audio();
+        element.src = url;
+        element.preload = 'auto';
+        element.playsInline = true;
+        element.setAttribute('playsinline', '');
+        element.setAttribute('webkit-playsinline', '');
+        element.load();
+        element.muted = isMuted;
+        element.addEventListener('ended', () => {
+          try {
+            element.currentTime = 0;
+          } catch (_) {}
+        });
+        audioElements[kind] = element;
       }
+      return audioElements[kind];
     }
 
-    function bindLifecycleHooks(ctx) {
-      if (!ctx || typeof ctx.addEventListener !== 'function') return;
-      ctx.addEventListener('statechange', () => {
-        if (ctx.state === 'interrupted') {
-          resumePending = true;
-        } else if (ctx.state === 'running') {
-          resumePending = false;
-        } else if (ctx.state === 'suspended' && !document.hidden) {
-          ctx.resume().catch(() => {});
-        }
-      });
-    }
-
-    function getAudioCtx() {
-      if (!audioCtx) {
-        audioCtx = instantiateAudioContext();
-        if (audioCtx) {
-          bindLifecycleHooks(audioCtx);
-        }
-      }
-      return audioCtx;
-    }
-
-    // iOS解錠の成功率を上げるための1サンプル無音出力（同期的に呼ぶ）
-    function primeSilentSync(ctx) {
-      try {
-        const buf = ctx.createBuffer(1, 1, 22050);
-        const src = ctx.createBufferSource();
-        src.buffer = buf;
-        src.connect(ctx.destination);
-        src.start(0);
-      } catch (_) {}
-    }
-
-    function warmup(ctx) {
-      try {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        gain.gain.value = 0.001;
-        osc.connect(gain).connect(ctx.destination);
-        const now = ctx.currentTime;
-        osc.start(now);
-        osc.stop(now + 0.01);
-      } catch (error) {
-        console.error('Failed to warm up AudioContext:', error);
-      }
+    function ensureAllElements() {
+      Object.keys(AUDIO_FILES).forEach(ensureElement);
     }
 
     function ensureContext() {
-      const ctx = getAudioCtx();
-      if (!ctx) return Promise.resolve(null);
-      if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
-        return ctx.resume().then(() => {
-          primeSilentSync(ctx); // 無音ワンショット
-          warmup(ctx);
-          warmedUp = true;
-          resumePending = false;
-          return ctx;
-        }).catch((error) => {
-          console.error('Failed to resume AudioContext:', error);
-          return null;
-        });
-      }
-      if (!warmedUp) {
-        primeSilentSync(ctx);
-        warmup(ctx);
-        warmedUp = true;
-      }
-      resumePending = false;
-      return Promise.resolve(ctx);
+      ensureAllElements();
+      return Promise.resolve(FAKE_CONTEXT);
     }
 
-    function withContext(callback) {
-      return ensureContext().then((ctx) => {
-        if (!ctx || isMuted) return null;
-        return callback(ctx);
-      });
+    function withElement(kind, callback) {
+      const element = ensureElement(kind);
+      if (!element) return null;
+      return callback(element);
     }
 
-    function playOrin(ctx, kind) {
-      if (!ctx || isMuted) return;
+    function attemptPlay(element, callbacks = {}) {
+      if (!element) return Promise.resolve(false);
+      const { onSuccess, onFailure } = callbacks;
 
-      const now = ctx.currentTime;
-      const master = ctx.createGain();
-      master.gain.setValueAtTime(0.0001, now);
-      master.connect(ctx.destination);
+      const handleFailure = (error) => {
+        if (error && error.name !== 'AbortError') {
+          console.warn('Audio play blocked:', error);
+        }
+        if (typeof onFailure === 'function') {
+          try { onFailure(error); } catch (callbackError) {
+            console.error('Audio onFailure callback failed:', callbackError);
+          }
+        }
+        return false;
+      };
 
-      let baseHz;
-      if (kind === 'inhale' || kind === 'start') baseHz = 1100;
-      else if (kind === 'hold') baseHz = 950;
-      else if (kind === 'exhale') baseHz = 820;
-      else baseHz = 950;
-
-      const tail = 3.2;
-      const peak = 0.45;
-
-      const burstDur = 0.012;
-      const noise = ctx.createBufferSource();
-      const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * burstDur), ctx.sampleRate);
-      const ch = buf.getChannelData(0);
-      for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ch.length * 0.65));
-      noise.buffer = buf;
-
-      const hp = ctx.createBiquadFilter();
-      hp.type = 'highpass';
-      hp.frequency.value = 300;
-      const strike = ctx.createGain();
-      strike.gain.setValueAtTime(peak * 0.7 * 1.5, now);
-      strike.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
-      noise.connect(hp).connect(strike).connect(master);
-
-      const modalBus = ctx.createGain();
-      modalBus.gain.value = 1.0;
-      const outEQ = ctx.createBiquadFilter();
-      outEQ.type = 'highshelf';
-      outEQ.frequency.value = 3500;
-      outEQ.gain.value = 3;
-      modalBus.connect(outEQ).connect(master);
-
-      const modes = [
-        { r: 0.99, q: 25, g: 1.00, d: tail },
-        { r: 2.01, q: 28, g: 0.55, d: tail * 0.9 },
-        { r: 2.32, q: 26, g: 0.42, d: tail * 0.85 },
-        { r: 2.74, q: 24, g: 0.36, d: tail * 0.8 },
-        { r: 3.76, q: 22, g: 0.28, d: tail * 0.7 },
-        { r: 4.07, q: 20, g: 0.22, d: tail * 0.6 },
-        { r: 6.80, q: 18, g: 0.15, d: tail * 0.5 }
-      ];
-
-      const excite = ctx.createBufferSource();
-      excite.buffer = buf;
-      modes.forEach((m) => {
-        const bp = ctx.createBiquadFilter();
-        bp.type = 'bandpass';
-        bp.frequency.value = baseHz * m.r;
-        bp.Q.value = m.q;
-        const g = ctx.createGain();
-        g.gain.setValueAtTime(peak * m.g * 1.5, now);
-        g.gain.exponentialRampToValueAtTime(0.0001, now + m.d);
-        excite.connect(bp).connect(g).connect(modalBus);
-      });
-
-      const partials = [
-        { r: 1.0, g: 0.35, d: tail * 1.0 },
-        { r: 2.01, g: 0.22, d: tail * 0.9 },
-        { r: 2.74, g: 0.15, d: tail * 0.8 },
-        { r: 3.76, g: 0.10, d: tail * 0.7 }
-      ];
-      partials.forEach((p) => {
-        const osc = ctx.createOscillator();
-        osc.type = 'sine';
-        const cents = (Math.random() * 6 - 3);
-        const detune = Math.pow(2, cents / 1200);
-        const startF = baseHz * p.r * detune;
-        const endF = startF * 0.985;
-        osc.frequency.setValueAtTime(startF, now);
-        osc.frequency.exponentialRampToValueAtTime(endF, now + p.d);
-        const g = ctx.createGain();
-        g.gain.setValueAtTime(p.g * peak * 1.5, now + 0.005);
-        g.gain.exponentialRampToValueAtTime(0.0001, now + p.d);
-        osc.connect(g).connect(master);
-        osc.start(now + 0.002);
-        osc.stop(now + p.d + 0.05);
-      });
+      const handleSuccess = () => {
+        unlocked = true;
+        if (typeof onSuccess === 'function') {
+          try { onSuccess(); } catch (callbackError) {
+            console.error('Audio onSuccess callback failed:', callbackError);
+          }
+        }
+        return true;
+      };
 
       try {
-        const early = ctx.createDelay(0.2);
-        early.delayTime.value = 0.028;
-        const eGain = ctx.createGain();
-        eGain.gain.value = 0.25;
-        master.connect(early).connect(eGain).connect(ctx.destination);
-      } catch (_) {}
-
-      master.gain.exponentialRampToValueAtTime(peak * 1.5, now + 0.012);
-      master.gain.exponentialRampToValueAtTime(0.0001, now + tail + 0.35);
-
-      noise.start(now);
-      noise.stop(now + burstDur);
-      excite.start(now);
-      excite.stop(now + 0.05);
-    }
-
-    function playClap(ctx) {
-      if (!ctx || isMuted) return;
-
-      const now = ctx.currentTime;
-      const master = ctx.createGain();
-      master.gain.setValueAtTime(0.0001, now);
-      master.connect(ctx.destination);
-
-      const dur = 0.12;
-      const src = ctx.createBufferSource();
-      const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
-      const ch = buf.getChannelData(0);
-      for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ch.length * 0.6));
-      src.buffer = buf;
-
-      const hp = ctx.createBiquadFilter();
-      hp.type = 'highpass';
-      hp.frequency.value = 800;
-      const lp = ctx.createBiquadFilter();
-      lp.type = 'lowpass';
-      lp.frequency.value = 6000;
-
-      const body = ctx.createGain();
-      body.gain.setValueAtTime(0.9 * 1.5, now);
-      body.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
-
-      src.connect(hp).connect(lp).connect(body).connect(master);
-      master.gain.exponentialRampToValueAtTime(0.63 * 1.5, now + 0.005);
-      master.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
-
-      try {
-        const delay = ctx.createDelay(0.3);
-        delay.delayTime.value = 0.06;
-        const g = ctx.createGain();
-        g.gain.value = 0.4 * 1.5;
-        body.connect(delay).connect(g).connect(master);
-      } catch (_) {}
-
-      src.start(now);
-      src.stop(now + dur);
+        const playResult = element.play();
+        if (playResult && typeof playResult.then === 'function') {
+          return playResult.then(handleSuccess).catch((error) => handleFailure(error));
+        }
+        return Promise.resolve(handleSuccess());
+      } catch (error) {
+        console.warn('Audio play failed:', error);
+        return Promise.resolve(handleFailure(error));
+      }
     }
 
     function playGuide(kind) {
-      withContext((ctx) => {
-        if (kind === 'end') {
-          playClap(ctx);
-        } else {
-          playOrin(ctx, kind);
-        }
-        return null;
+      if (isMuted) return Promise.resolve(false);
+      const result = withElement(kind, (element) => {
+        try {
+          element.currentTime = 0;
+        } catch (_) {}
+        return attemptPlay(element);
       });
+      return result || Promise.resolve(false);
     }
 
     function toggleMuted() {
-      isMuted = !isMuted;
+      setMuted(!isMuted);
       return isMuted;
     }
 
     function setMuted(value) {
       isMuted = Boolean(value);
+      Object.keys(audioElements).forEach((key) => {
+        const element = audioElements[key];
+        if (!element) return;
+        element.muted = isMuted;
+        if (isMuted) {
+          try { element.pause(); } catch (_) {}
+          try { element.currentTime = 0; } catch (_) {}
+        }
+      });
       return isMuted;
     }
 
@@ -626,39 +493,42 @@
     }
 
     function refreshOutput() {
-      const ctx = audioCtx;
-      if (!ctx) return ensureContext();
-      audioCtx = null;
-      warmedUp = false;
-      resumePending = false;
-      if (typeof ctx.close === 'function') {
-        return ctx.close().catch((error) => {
-          console.error('Failed to close AudioContext:', error);
-        }).finally(() => ensureContext());
-      }
+      Object.keys(audioElements).forEach((key) => {
+        const element = audioElements[key];
+        if (!element) return;
+        try { element.pause(); } catch (_) {}
+        delete audioElements[key];
+      });
+      unlocked = false;
       return ensureContext();
     }
 
     function resumeIfNeeded() {
-      if (resumePending) {
-        return ensureContext();
-      }
-      if (audioCtx && audioCtx.state === 'suspended' && !document.hidden) {
-        return ensureContext();
-      }
-      return Promise.resolve(audioCtx || null);
+      ensureAllElements();
+      return Promise.resolve(FAKE_CONTEXT);
     }
 
-    // --- 追加: 同期的に呼べる poke() と状態チェック ---
     function poke() {
-      const ctx = getAudioCtx();
-      if (!ctx) return;
-      try { ctx.resume(); } catch (_) {}
-      primeSilentSync(ctx);
+      ensureAllElements();
+      const attempts = Object.keys(audioElements).map((key) => {
+        const element = audioElements[key];
+        if (!element) return Promise.resolve(false);
+        const restoreMuted = element.muted;
+        element.muted = true;
+        return attemptPlay(element, {
+          onSuccess: () => {
+            try { element.pause(); } catch (_) {}
+            try { element.currentTime = 0; } catch (_) {}
+          },
+        }).finally(() => {
+          element.muted = restoreMuted;
+        });
+      });
+      return Promise.all(attempts).then((results) => results.some(Boolean));
     }
 
     function isRunningSync() {
-      return !!(audioCtx && audioCtx.state === 'running');
+      return unlocked;
     }
 
     return {
@@ -669,7 +539,6 @@
       isMuted: muted,
       refreshOutput,
       resumeIfNeeded,
-      // 追加API
       poke,
       isRunningSync,
     };
