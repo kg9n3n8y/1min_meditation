@@ -558,6 +558,7 @@
     function playGuide(kind) {
       if (isMuted) return Promise.resolve(false);
       const result = withElement(kind, (element) => {
+        element.muted = isMuted; // poke() の一時的なミュート状態を確実に戻す
         try {
           element.currentTime = 0;
         } catch (_) {}
