@@ -5,6 +5,7 @@
   const progressRing = document.getElementById('progressRing');
   const timerCard = document.querySelector('.timer-card');
   const copyUrlBtn = document.getElementById('copyUrlBtn');
+  const resetConfigBtn = document.getElementById('resetConfigBtn');
   const inhaleSlider = document.getElementById('inhaleSlider');
   const holdSlider = document.getElementById('holdSlider');
   const exhaleSlider = document.getElementById('exhaleSlider');
@@ -33,6 +34,71 @@
   const EXHALE_MAX_SECONDS = 16;
   const CYCLE_MIN_COUNT = 1;
   const CYCLE_MAX_COUNT = 9;
+  const CONFIG_STORAGE_KEY = 'breathingConfig:v1';
+  const storage = (() => {
+    try {
+      return window.localStorage;
+    } catch (_) {
+      return null;
+    }
+  })();
+
+  function loadStoredConfig() {
+    if (!storage) return null;
+    try {
+      const raw = storage.getItem(CONFIG_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return null;
+      return parsed;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function saveStoredConfig(config) {
+    if (!storage) return;
+    try {
+      storage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+    } catch (_) {}
+  }
+
+  function applyStoredConfigToSliders(config) {
+    if (!config) return;
+    const nextInhale = clampNumber(config.inhaleSeconds, INHALE_MIN_SECONDS, INHALE_MAX_SECONDS, DEFAULT_INHALE_SECONDS);
+    const nextHold = clampNumber(config.holdSeconds, HOLD_MIN_SECONDS, HOLD_MAX_SECONDS, DEFAULT_HOLD_SECONDS);
+    const nextExhale = clampNumber(config.exhaleSeconds, EXHALE_MIN_SECONDS, EXHALE_MAX_SECONDS, DEFAULT_EXHALE_SECONDS);
+    const nextCycle = clampNumber(config.cycleCount, CYCLE_MIN_COUNT, CYCLE_MAX_COUNT, DEFAULT_CYCLE_COUNT);
+    if (inhaleSlider && Number.isFinite(nextInhale)) {
+      inhaleSlider.value = String(nextInhale);
+    }
+    if (holdSlider && Number.isFinite(nextHold)) {
+      holdSlider.value = String(nextHold);
+    }
+    if (exhaleSlider && Number.isFinite(nextExhale)) {
+      exhaleSlider.value = String(nextExhale);
+    }
+    if (cycleSlider && Number.isFinite(nextCycle)) {
+      cycleSlider.value = String(nextCycle);
+    }
+  }
+
+  function applyDefaultConfigToSliders() {
+    if (inhaleSlider) {
+      inhaleSlider.value = String(DEFAULT_INHALE_SECONDS);
+    }
+    if (holdSlider) {
+      holdSlider.value = String(DEFAULT_HOLD_SECONDS);
+    }
+    if (exhaleSlider) {
+      exhaleSlider.value = String(DEFAULT_EXHALE_SECONDS);
+    }
+    if (cycleSlider) {
+      cycleSlider.value = String(DEFAULT_CYCLE_COUNT);
+    }
+  }
+
+  applyStoredConfigToSliders(loadStoredConfig());
 
   const audioEngine = createGuideAudio();
   const audioUnlock = setupAudioUnlockController(audioEngine);
@@ -123,7 +189,8 @@
     }
   }
 
-  function applyConfig() {
+  function applyConfig(options = {}) {
+    const { persist = true } = options;
     inhaleSeconds = getSliderValue(inhaleSlider, DEFAULT_INHALE_SECONDS, INHALE_MIN_SECONDS, INHALE_MAX_SECONDS);
     holdSeconds = getSliderValue(holdSlider, DEFAULT_HOLD_SECONDS, HOLD_MIN_SECONDS, HOLD_MAX_SECONDS);
     exhaleSeconds = getSliderValue(exhaleSlider, DEFAULT_EXHALE_SECONDS, EXHALE_MIN_SECONDS, EXHALE_MAX_SECONDS);
@@ -132,6 +199,9 @@
     totalSeconds = getTotalSeconds(pattern);
     reset();
     updateConfigDisplay();
+    if (persist) {
+      persistCurrentConfig();
+    }
   }
 
   function announceConfig() {
@@ -255,6 +325,15 @@
     }
   }
 
+  function persistCurrentConfig() {
+    saveStoredConfig({
+      inhaleSeconds,
+      holdSeconds,
+      exhaleSeconds,
+      cycleCount,
+    });
+  }
+
   applyConfig();
 
   // --- ユーザー操作ハンドラ: 最初のタップで同期的に poke() して解錠を強化 ---
@@ -283,12 +362,14 @@
 
   if (inhaleSlider) {
     inhaleSlider.addEventListener('input', () => {
-      applyConfig();
+      applyConfig({ persist: false });
     });
     inhaleSlider.addEventListener('change', () => {
       const next = getSliderValue(inhaleSlider, DEFAULT_INHALE_SECONDS, INHALE_MIN_SECONDS, INHALE_MAX_SECONDS);
       if (next !== inhaleSeconds) {
         applyConfig();
+      } else {
+        persistCurrentConfig();
       }
       announceConfig();
     });
@@ -296,12 +377,14 @@
 
   if (holdSlider) {
     holdSlider.addEventListener('input', () => {
-      applyConfig();
+      applyConfig({ persist: false });
     });
     holdSlider.addEventListener('change', () => {
       const next = getSliderValue(holdSlider, DEFAULT_HOLD_SECONDS, HOLD_MIN_SECONDS, HOLD_MAX_SECONDS);
       if (next !== holdSeconds) {
         applyConfig();
+      } else {
+        persistCurrentConfig();
       }
       announceConfig();
     });
@@ -309,12 +392,14 @@
 
   if (exhaleSlider) {
     exhaleSlider.addEventListener('input', () => {
-      applyConfig();
+      applyConfig({ persist: false });
     });
     exhaleSlider.addEventListener('change', () => {
       const next = getSliderValue(exhaleSlider, DEFAULT_EXHALE_SECONDS, EXHALE_MIN_SECONDS, EXHALE_MAX_SECONDS);
       if (next !== exhaleSeconds) {
         applyConfig();
+      } else {
+        persistCurrentConfig();
       }
       announceConfig();
     });
@@ -322,15 +407,25 @@
 
   if (cycleSlider) {
     cycleSlider.addEventListener('input', () => {
-      applyConfig();
+      applyConfig({ persist: false });
     });
     cycleSlider.addEventListener('change', () => {
       const next = getSliderValue(cycleSlider, DEFAULT_CYCLE_COUNT, CYCLE_MIN_COUNT, CYCLE_MAX_COUNT);
       if (next !== cycleCount) {
         applyConfig();
+      } else {
+        persistCurrentConfig();
       }
       announceConfig();
     });
+  }
+
+  if (resetConfigBtn) {
+    resetConfigBtn.addEventListener('click', () => {
+      applyDefaultConfigToSliders();
+      applyConfig();
+      announceConfig();
+    }, { passive: true });
   }
 
   if (copyUrlBtn) {
@@ -635,9 +730,12 @@
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) {
-      audioEngine.resumeIfNeeded().catch(() => {});
+    if (document.hidden) {
+      audioUnlock.markLocked();
+      scheduleAudioRefresh();
+      return;
     }
+    audioEngine.resumeIfNeeded().catch(() => {});
   });
 
   window.addEventListener('focus', () => {
@@ -650,6 +748,11 @@
     } else {
       audioEngine.resumeIfNeeded().catch(() => {});
     }
+  });
+
+  window.addEventListener('pagehide', () => {
+    audioUnlock.markLocked();
+    scheduleAudioRefresh();
   });
 
   if (navigator.mediaDevices && typeof navigator.mediaDevices.addEventListener === 'function') {
