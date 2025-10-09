@@ -339,25 +339,34 @@
   applyConfig();
 
   // --- ユーザー操作ハンドラ: 最初のタップで同期的に poke() して解錠を強化 ---
-  startButton.addEventListener('click', (e) => {
+  startButton.addEventListener('click', async (e) => {
     e.stopPropagation();
-    audioEngine.poke(); // 同期: resume 呼び出し + 1サンプル無音
+    const pokePromise = audioEngine.poke(); // 同期: resume 呼び出し + 1サンプル無音
     audioUnlock.unlock();
+    try {
+      await pokePromise;
+    } catch (_) {}
     onButtonClick();
   }, { passive: true });
-  timerCard.addEventListener('click', () => {
-    audioEngine.poke();
+  timerCard.addEventListener('click', async () => {
+    const pokePromise = audioEngine.poke();
     audioUnlock.unlock();
+    try {
+      await pokePromise;
+    } catch (_) {}
     onButtonClick();
   }, { passive: true });
   timerCard.tabIndex = 0;
   timerCard.setAttribute('role', 'button');
   timerCard.setAttribute('aria-label', 'タイマーの開始と停止');
-  timerCard.addEventListener('keydown', (e) => {
+  timerCard.addEventListener('keydown', async (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      audioEngine.poke();
+      const pokePromise = audioEngine.poke();
       audioUnlock.unlock();
+      try {
+        await pokePromise;
+      } catch (_) {}
       onButtonClick();
     }
   });
