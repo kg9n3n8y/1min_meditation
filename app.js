@@ -34,6 +34,7 @@
   const EXHALE_MAX_SECONDS = 16;
   const CYCLE_MIN_COUNT = 1;
   const CYCLE_MAX_COUNT = 9;
+  const COUNTDOWN_SECONDS = 3;
   const CONFIG_STORAGE_KEY = 'breathingConfig:v1';
   const storage = (() => {
     try {
@@ -116,10 +117,13 @@
   let totalSeconds = getTotalSeconds(pattern);
 
   let isRunning = false;
+  let isCountdown = false;
   let currentIndex = 0;
   let phaseEndTs = 0;
   let timerRaf = 0;
   let totalStartTs = 0;
+  let countdownStartTs = 0;
+  let countdownRaf = 0;
   let pendingAudioRefresh = false;
   let refreshInFlight = null;
 
@@ -215,7 +219,41 @@
     phaseLiveRegion.textContent = `吸う${inhaleSeconds}秒、止める${holdSeconds}秒、吐く${exhaleSeconds}秒、${cycleCount}回のサイクルを設定しました`;
   }
 
-  function start() {
+  function startCountdown() {
+    if (isRunning || isCountdown) return;
+    isCountdown = true;
+    startButton.textContent = '停止';
+    startButton.setAttribute('aria-label', 'タイマー停止');
+    updatePhaseLabel('まず吐いて');
+    countdownLabel.textContent = String(COUNTDOWN_SECONDS);
+    updateProgress(0);
+    countdownStartTs = performance.now();
+    countdownRaf = requestAnimationFrame(countdownLoop);
+    audioEngine.playGuide('countdown');
+  }
+
+  function stopCountdown() {
+    if (!isCountdown) return;
+    isCountdown = false;
+    cancelAnimationFrame(countdownRaf);
+    countdownRaf = 0;
+    countdownStartTs = 0;
+  }
+
+  function countdownLoop(now) {
+    if (!isCountdown) return;
+    const elapsedSec = (now - countdownStartTs) / ONE_SECOND_MS;
+    const remaining = COUNTDOWN_SECONDS - elapsedSec;
+    if (remaining <= 0) {
+      stopCountdown();
+      beginSession(now);
+      return;
+    }
+    countdownLabel.textContent = String(Math.max(1, Math.ceil(remaining)));
+    countdownRaf = requestAnimationFrame(countdownLoop);
+  }
+
+  function beginSession(startTimestamp = performance.now()) {
     if (isRunning) return;
     flushAudioRefresh({ force: true });
     isRunning = true;
@@ -225,7 +263,7 @@
     startButton.textContent = '停止';
     startButton.setAttribute('aria-label', 'タイマー停止');
     currentIndex = 0;
-    totalStartTs = performance.now();
+    totalStartTs = startTimestamp;
     const first = pattern[currentIndex];
     updatePhaseLabel(first.label);
     phaseEndTs = totalStartTs + first.duration * ONE_SECOND_MS;
@@ -256,6 +294,7 @@
   }
 
   function reset() {
+    stopCountdown();
     isRunning = false;
     cancelAnimationFrame(timerRaf);
     timerRaf = 0;
@@ -314,10 +353,10 @@
   }
 
   function onButtonClick() {
-    if (isRunning) {
+    if (isRunning || isCountdown) {
       reset();
     } else {
-      start();
+      startCountdown();
     }
   }
 
@@ -339,22 +378,21 @@
   applyConfig();
 
   // --- ユーザー操作ハンドラ: 最初のタップで同期的に poke() して解錠を強化 ---
-  startButton.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    const pokePromise = audioEngine.poke(); // 同期: resume 呼び出し + 1サンプル無音
-    audioUnlock.unlock();
-    try {
-      await pokePromise;
-    } catch (_) {}
-    onButtonClick();
-  }, { passive: true });
-  timerCard.addEventListener('click', async () => {
+  async function withAudioUnlock(action) {
     const pokePromise = audioEngine.poke();
     audioUnlock.unlock();
     try {
       await pokePromise;
     } catch (_) {}
-    onButtonClick();
+    return action();
+  }
+
+  startButton.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await withAudioUnlock(onButtonClick);
+  }, { passive: true });
+  timerCard.addEventListener('click', async () => {
+    await withAudioUnlock(onButtonClick);
   }, { passive: true });
   timerCard.tabIndex = 0;
   timerCard.setAttribute('role', 'button');
@@ -362,12 +400,7 @@
   timerCard.addEventListener('keydown', async (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      const pokePromise = audioEngine.poke();
-      audioUnlock.unlock();
-      try {
-        await pokePromise;
-      } catch (_) {}
-      onButtonClick();
+      await withAudioUnlock(onButtonClick);
     }
   });
 
@@ -460,24 +493,13 @@
   }
 
 
-  function registerServiceWorker() {
-    if (!('serviceWorker' in navigator)) return;
-    const swUrl = './service-worker.js';
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register(swUrl).catch((error) => {
-        console.error('Service worker registration failed:', error);
-      });
-    });
-  }
-
-  registerServiceWorker();
-
   function createGuideAudio() {
     const AUDIO_FILES = {
       inhale: 'audio/inhale.mp3',
       hold: 'audio/hold.mp3',
       exhale: 'audio/exhale.mp3',
       end: 'audio/end.mp3',
+      countdown: 'audio/muon.mp3',
     };
 
     const audioElements = {};
