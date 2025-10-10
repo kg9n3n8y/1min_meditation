@@ -29,7 +29,7 @@
   const INHALE_MIN_SECONDS = 2;
   const INHALE_MAX_SECONDS = 8;
   const HOLD_MIN_SECONDS = 0;
-  const HOLD_MAX_SECONDS = 8;
+  const HOLD_MAX_SECONDS = 10;
   const EXHALE_MIN_SECONDS = 4;
   const EXHALE_MAX_SECONDS = 16;
   const CYCLE_MIN_COUNT = 1;
