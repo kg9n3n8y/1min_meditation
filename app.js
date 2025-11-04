@@ -327,6 +327,9 @@
   }
 
   function loop() {
+    if (!isRunning) {
+      return;
+    }
     const now = performance.now();
     const totalElapsedSec = (now - totalStartTs) / ONE_SECOND_MS;
     updateProgress(totalElapsedSec);
@@ -349,6 +352,9 @@
       }
     }
 
+    if (!isRunning) {
+      return;
+    }
     timerRaf = requestAnimationFrame(loop);
   }
 
