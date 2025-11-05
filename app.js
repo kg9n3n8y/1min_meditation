@@ -841,20 +841,20 @@
 
       return ensureContext().then((ctx) => {
         if (!ctx) return false;
-        if (ctx.state === 'suspended') {
-          return ctx.resume().catch(() => ctx).then(() => {
-            const played = scheduleTone(ctx, preset);
-            if (played && ctx.state === 'running') {
-              unlocked = true;
-            }
-            return played;
-          });
-        }
-        const played = scheduleTone(ctx, preset);
-        if (played && ctx.state === 'running') {
-          unlocked = true;
-        }
-        return played;
+        const needsResume = ctx.state === 'suspended' || ctx.state === 'interrupted';
+        const ensureRunning = needsResume
+          ? ctx.resume().catch(() => ctx)
+          : Promise.resolve(ctx);
+        return ensureRunning.then((activeCtx) => {
+          if (!activeCtx || activeCtx.state !== 'running') {
+            return false;
+          }
+          const played = scheduleTone(activeCtx, preset);
+          if (played) {
+            unlocked = true;
+          }
+          return played;
+        });
       }).catch((error) => {
         console.warn('Audio play failed:', error);
         return false;
