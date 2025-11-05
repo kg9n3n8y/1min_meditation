@@ -384,12 +384,29 @@
 
   // --- ユーザー操作ハンドラ: 最初のタップで同期的に poke() して解錠を強化 ---
   async function withAudioUnlock(action) {
-    const pokePromise = audioEngine.poke();
+    const pokePromise = Promise.resolve().then(() => audioEngine.poke()).catch(() => false);
     audioUnlock.unlock();
+    let actionError;
+    let actionResult;
     try {
-      await pokePromise;
+      actionResult = action();
+      if (actionResult && typeof actionResult.then === 'function') {
+        await actionResult;
+      }
+    } catch (error) {
+      actionError = error;
+    }
+    try {
+      // iOS PWA の復帰直後に poke() が解決しないケースがあるためタイムアウトを設ける
+      await Promise.race([
+        pokePromise,
+        new Promise((resolve) => { setTimeout(resolve, 150); }),
+      ]);
     } catch (_) {}
-    return action();
+    if (actionError) {
+      throw actionError;
+    }
+    return actionResult;
   }
 
   startButton.addEventListener('click', async (e) => {
