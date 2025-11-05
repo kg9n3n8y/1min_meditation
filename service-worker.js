@@ -10,12 +10,7 @@ const PRECACHE_ASSETS = [
   './thumbnail.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
-  './icons/icon.svg',
-  './audio/inhale.mp3',
-  './audio/hold.mp3',
-  './audio/exhale.mp3',
-  './audio/end.mp3',
-  './audio/muon.mp3'
+  './icons/icon.svg'
 ];
 
 self.addEventListener('install', (event) => {

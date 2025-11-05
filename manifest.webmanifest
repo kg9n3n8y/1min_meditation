@@ -1,6 +1,6 @@
 {
   "name": "スキマ瞑想",
-  "short_name": "瞑想タイマー",
+  "short_name": "スキマ瞑想",
   "description": "呼吸リズムに合わせて集中できる短時間の瞑想タイマー",
   "lang": "ja",
   "start_url": "./",
