@@ -1,5 +1,6 @@
 {
   "root": true,
+  "ignorePatterns": ["dist/**", "node_modules/**"],
   "env": {
     "browser": true,
     "es2021": true
@@ -7,11 +8,20 @@
   "extends": ["eslint:recommended"],
   "parserOptions": {
     "ecmaVersion": "latest",
-    "sourceType": "script"
+    "sourceType": "module",
+    "ecmaFeatures": {
+      "jsx": true
+    }
+  },
+  "globals": {
+    "h": "readonly",
+    "Fragment": "readonly"
   },
   "rules": {
     "no-console": ["warn", { "allow": ["warn", "error"] }],
     "prefer-const": "warn",
-    "no-var": "error"
+    "no-var": "error",
+    "no-empty": ["error", { "allowEmptyCatch": true }],
+    "no-unused-vars": ["error", { "varsIgnorePattern": "^(App|TimerCard|ConfigSliders|InstallBanner|Footer)$", "argsIgnorePattern": "^_" }]
   }
 }
