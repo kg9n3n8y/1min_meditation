@@ -53,9 +53,9 @@ npm run preview
 
 ## デプロイ
 
-`main` ブランチへの push で GitHub Actions がビルドし、GitHub Pages にデプロイします。
+`main` ブランチへの push で GitHub Actions がビルドし、成果物をリポジトリ直下にコミットします。GitHub Pages は `main` ブランチのルートを配信する想定です。
 
-リポジトリ設定で Pages のソースを **GitHub Actions** にしてください。
+開発用の HTML は `index.source.html`、公開される HTML はビルド後の `index.html` です。
 
 ## クレジット
 ガイド音生成にはブラウザ組み込みのWeb Audio APIを利用しています。

@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prebuild": "node scripts/generate-icons.mjs",
+    "predev": "cp index.source.html index.html",
+    "prebuild": "cp index.source.html index.html && node scripts/generate-icons.mjs",
     "dev": "vite",
     "build": "vite build",
+    "postbuild": "node scripts/copy-dist-to-root.mjs",
     "preview": "vite preview",
     "lint": "eslint src --ext .js,.jsx"
   },
